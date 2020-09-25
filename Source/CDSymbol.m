@@ -1,7 +1,7 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDSymbol.h"
 
@@ -14,124 +14,129 @@
 
 NSString *const ObjCClassSymbolPrefix = @"_OBJC_CLASS_$_";
 
+@interface CDSymbol ()
+@property (weak, readonly) CDMachOFile *machOFile;
+@end
+
+#pragma mark -
+
 @implementation CDSymbol
+{
+    struct nlist_64 _nlist;
+    BOOL _is32Bit;
+    NSString *_name;
+    __weak CDMachOFile *_machOFile;
+}
 
-- (id)initWithName:(NSString *)aName machOFile:(CDMachOFile *)aMachOFile nlist32:(struct nlist)nlist32;
+- (id)initWithName:(NSString *)name machOFile:(CDMachOFile *)machOFile nlist32:(struct nlist)nlist32;
 {
     if ((self = [super init])) {
-        is32Bit = YES;
-        name = [aName retain];
-        nonretained_machOFile = aMachOFile;
-        nlist.n_un.n_strx = 0; // We don't use it.
-        nlist.n_type = nlist32.n_type;
-        nlist.n_sect = nlist32.n_sect;
-        nlist.n_desc = nlist32.n_desc;
-        nlist.n_value = nlist32.n_value;
+        _is32Bit = YES;
+        _name = name;
+        _machOFile = machOFile;
+        _nlist.n_un.n_strx = 0; // We don't use it.
+        _nlist.n_type      = nlist32.n_type;
+        _nlist.n_sect      = nlist32.n_sect;
+        _nlist.n_desc      = nlist32.n_desc;
+        _nlist.n_value     = nlist32.n_value;
     }
 
     return self;
 }
 
-- (id)initWithName:(NSString *)aName machOFile:(CDMachOFile *)aMachOFile nlist64:(struct nlist_64)nlist64;
+- (id)initWithName:(NSString *)name machOFile:(CDMachOFile *)machOFile nlist64:(struct nlist_64)nlist64;
 {
     if ((self = [super init])) {
-        is32Bit = NO;
-        name = [aName retain];
-        nonretained_machOFile = aMachOFile;
-        nlist.n_un.n_strx = 0; // We don't use it.
-        nlist.n_type = nlist64.n_type;
-        nlist.n_sect = nlist64.n_sect;
-        nlist.n_desc = nlist64.n_desc;
-        nlist.n_value = nlist64.n_value;
+        _is32Bit = NO;
+        _name = name;
+        _machOFile = machOFile;
+        _nlist.n_un.n_strx = 0; // We don't use it.
+        _nlist.n_type      = nlist64.n_type;
+        _nlist.n_sect      = nlist64.n_sect;
+        _nlist.n_desc      = nlist64.n_desc;
+        _nlist.n_value     = nlist64.n_value;
     }
 
     return self;
-}
-
-- (void)dealloc;
-{
-    [name release];
-
-    [super dealloc];
 }
 
 #pragma mark - Debugging
 
 - (NSString *)description;
 {
-    NSString *valueFormat = [NSString stringWithFormat:@"%%0%ullx", is32Bit ? 8 : 16];
-    NSString *valuePad = is32Bit ? @"        " : @"                ";
-    NSString *valueString = self.isUndefined ? valuePad : [NSString stringWithFormat:valueFormat, self.value];
-    //NSString *dylibName = [[[self.dylibLoadCommand.path lastPathComponent] componentsSeparatedByString:@"."] objectAtIndex:0];
-    //NSString *fromString = self.isUndefined ? [NSString stringWithFormat:@" (from %@)", dylibName] : @"";
+    NSString *valueString;
 
-    return [NSString stringWithFormat:@"%@ %@ %@", valueString, [self shortTypeDescription], name];
+    if (self.isDefined) {
+        valueString = [NSString stringWithFormat:(_is32Bit ? @"%08llx" : @"%016llx"), self.value];
+    } else {
+        valueString = [@" " stringByPaddingToLength:(_is32Bit ? 8 : 16) withString:@" " startingAtIndex:0];
+    }
 
-    //return [NSString stringWithFormat:@"%@ (%@) %@ %@%@", valueString, [self longTypeDescription], [self isExternal] ? @"external" : @"non-external", name, fromString];
-    //return [NSString stringWithFormat:[valueFormat stringByAppendingString:@" %02x %02x %04x - %@"], nlist.n_value, nlist.n_type, nlist.n_sect, nlist.n_desc, name];
+    return [NSString stringWithFormat:@"%@ %@ %@", valueString, [self shortTypeDescription], self.name];
 }
 
 #pragma mark -
 
-- (uint64_t)value;
++ (NSString *)classNameFromSymbolName:(NSString *)symbolName;
 {
-    return nlist.n_value;
+    if ([symbolName hasPrefix:ObjCClassSymbolPrefix])
+        return [symbolName substringFromIndex:[ObjCClassSymbolPrefix length]];
+    else
+        return nil;
 }
 
-@synthesize name;
-
-- (CDSection *)section
+- (uint64_t)value;
 {
-    // We might be tempted to do [[nonretained_machOFile segmentContainingAddress:nlist.n_value] sectionContainingAddress:nlist.n_value]
+    return _nlist.n_value;
+}
+
+- (CDSection *)section;
+{
+    // We might be tempted to do [[self.machOFile segmentContainingAddress:nlist.n_value] sectionContainingAddress:nlist.n_value]
     // but this does not work for __mh_dylib_header for example (n_value == 0, but it is in the __TEXT,__text section)
     NSMutableArray *sections = [NSMutableArray array];
-    for (CDLCSegment *segment in [nonretained_machOFile segments]) {
+    for (CDLCSegment *segment in self.machOFile.segments) {
         for (CDSection *section in [segment sections])
             [sections addObject:section];
     }
 
     // n_sect is 1-indexed (NO_SECT == 0)
-    NSUInteger sectionIndex = nlist.n_sect - 1;
+    NSUInteger sectionIndex = _nlist.n_sect - 1;
     if (sectionIndex < [sections count])
-        return [sections objectAtIndex:sectionIndex];
+        return sections[sectionIndex];
     else
         return nil;
 }
 
 - (CDLCDylib *)dylibLoadCommand;
 {
-    NSUInteger libraryOrdinal = GET_LIBRARY_ORDINAL(nlist.n_desc);
-    NSArray *dylibLoadCommands = [nonretained_machOFile dylibLoadCommands];
-
-    if (libraryOrdinal < [dylibLoadCommands count])
-        return [dylibLoadCommands objectAtIndex:libraryOrdinal];
-    else
-        return nil;
+    NSUInteger libraryOrdinal = GET_LIBRARY_ORDINAL(_nlist.n_desc);
+    return [self.machOFile dylibLoadCommandForLibraryOrdinal:libraryOrdinal];
 }
 
 - (BOOL)isExternal;
 {
-    return (nlist.n_type & N_EXT) == N_EXT;
+    return (_nlist.n_type & N_EXT) == N_EXT;
 }
 
 - (BOOL)isPrivateExternal;
 {
-    return (nlist.n_type & N_PEXT) == N_PEXT;
+    return (_nlist.n_type & N_PEXT) == N_PEXT;
 }
 
 - (NSUInteger)stab;
 {
-    return nlist.n_type & N_STAB;
+    return _nlist.n_type & N_STAB;
 }
 
 - (NSUInteger)type;
 {
-    return nlist.n_type & N_TYPE;
+    return _nlist.n_type & N_TYPE;
 }
 
-- (BOOL)isUndefined;
+- (BOOL)isDefined;
 {
-    return self.type == N_UNDF;
+    return self.type != N_UNDF;
 }
 
 - (BOOL)isAbsolute;
@@ -156,7 +161,7 @@ NSString *const ObjCClassSymbolPrefix = @"_OBJC_CLASS_$_";
 
 - (BOOL)isCommon;
 {
-    return self.isUndefined && self.isExternal && nlist.n_value != 0;
+    return !self.isDefined && self.isExternal && _nlist.n_value != 0;
 }
 
 - (BOOL)isInTextSection;
@@ -179,7 +184,7 @@ NSString *const ObjCClassSymbolPrefix = @"_OBJC_CLASS_$_";
 
 - (NSUInteger)referenceType;
 {
-    return (nlist.n_desc & REFERENCE_TYPE);
+    return (_nlist.n_desc & REFERENCE_TYPE);
 }
 
 - (NSString *)referenceTypeName
@@ -195,74 +200,54 @@ NSString *const ObjCClassSymbolPrefix = @"_OBJC_CLASS_$_";
     return nil;
 }
 
-- (NSComparisonResult)compare:(CDSymbol *)otherSymbol;
+- (NSComparisonResult)compare:(CDSymbol *)other;
 {
-    if (otherSymbol.value > self.value)
-        return NSOrderedAscending;
-    else if (otherSymbol.value < self.value)
-        return NSOrderedDescending;
-    else
-        return NSOrderedSame;
+    if (other.value > self.value) return NSOrderedAscending;
+    if (other.value < self.value) return NSOrderedDescending;
+
+    return NSOrderedSame;
 }
 
-- (NSComparisonResult)nameCompare:(CDSymbol *)otherSymbol;
+- (NSComparisonResult)compareByName:(CDSymbol *)other;
 {
-    return [self.name compare:otherSymbol.name];
+    return [self.name compare:other.name];
 }
 
 - (NSString *)shortTypeDescription;
 {
-    NSString *c = nil;
+    NSString *c;
 
-    if (self.stab)
-        c = @"-";
-    else if (self.isCommon)
-        c = @"c";
-    else if (self.isUndefined || self.isPrebound)
-        c =  @"u";
-    else if (self.isAbsolute)
-        c =  @"a";
+    if (self.stab)                               c = @"-";
+    else if (self.isCommon)                      c = @"c";
+    else if (!self.isDefined || self.isPrebound) c = @"u";
+    else if (self.isAbsolute)                    c = @"a";
     else if (self.isInSection) {
-        if (self.isInTextSection)
-            c = @"t";
-        else if (self.isInDataSection)
-            c = @"d";
-        else if (self.isInBssSection)
-            c = @"b";
-        else
-            c = @"s";
+        if (self.isInTextSection)                c = @"t";
+        else if (self.isInDataSection)           c = @"d";
+        else if (self.isInBssSection)            c = @"b";
+        else                                     c = @"s";
     }
-    else if (self.isIndirect)
-        c = @"i";
-    else
-        c = @"?";
+    else if (self.isIndirect)                    c = @"i";
+    else                                         c = @"?";
 
     return self.isExternal ? [c uppercaseString] : c;
 }
 
 - (NSString *)longTypeDescription;
 {
-    NSString *c = nil;
+    NSString *c;
 
-    if (self.isCommon)
-        c = @"common";
-    else if (self.isUndefined)
-        c =  @"undefined";
-    else if (self.isPrebound)
-        c =  @"prebound";
-    else if (self.isAbsolute)
-        c =  @"absolute";
+    if (self.isCommon)                           c = @"common";
+    else if (!self.isDefined)                    c =  @"undefined";
+    else if (self.isPrebound)                    c =  @"prebound";
+    else if (self.isAbsolute)                    c =  @"absolute";
     else if (self.isInSection) {
         CDSection *section = self.section;
-        if (section)
-            c = [NSString stringWithFormat:@"%@,%@", section.segmentName, section.sectionName];
-        else
-            c = @"?,?";
+        if (section)                             c = [NSString stringWithFormat:@"%@,%@", section.segmentName, section.sectionName];
+        else                                     c = @"?,?";
     }
-    else if (self.isIndirect)
-        c = @"indirect";
-    else
-        c = @"?";
+    else if (self.isIndirect)                    c = @"indirect";
+    else                                         c = @"?";
 
     return c;
 }

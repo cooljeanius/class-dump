@@ -1,9 +1,7 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
-
-#import <Foundation/Foundation.h>
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #include <mach-o/nlist.h>
 
@@ -12,42 +10,36 @@ extern NSString *const ObjCClassSymbolPrefix;
 @class CDMachOFile, CDSection, CDLCDylib;
 
 @interface CDSymbol : NSObject
-{
-    struct nlist_64 nlist;
-    BOOL is32Bit;
-    NSString *name;
-    CDMachOFile *nonretained_machOFile;
-}
 
-- (id)initWithName:(NSString *)aName machOFile:(CDMachOFile *)aMachOFile nlist32:(struct nlist)nlist32;
-- (id)initWithName:(NSString *)aName machOFile:(CDMachOFile *)aMachOFile nlist64:(struct nlist_64)nlist64;
+- (id)initWithName:(NSString *)name machOFile:(CDMachOFile *)machOFile nlist32:(struct nlist)nlist32;
+- (id)initWithName:(NSString *)name machOFile:(CDMachOFile *)machOFile nlist64:(struct nlist_64)nlist64;
 
-- (NSString *)description;
-
-@property (readonly) uint64_t value;
+@property (nonatomic, readonly) uint64_t value;
 @property (readonly) NSString *name;
-@property (readonly) CDSection *section;
-@property (readonly) CDLCDylib *dylibLoadCommand;
+@property (nonatomic, readonly) CDSection *section;
+@property (nonatomic, readonly) CDLCDylib *dylibLoadCommand;
 
-@property (readonly) BOOL isExternal;
-@property (readonly) BOOL isPrivateExternal;
-@property (readonly) NSUInteger stab;
-@property (readonly) NSUInteger type;
-@property (readonly) BOOL isUndefined;
-@property (readonly) BOOL isAbsolute;
-@property (readonly) BOOL isInSection;
-@property (readonly) BOOL isPrebound;
-@property (readonly) BOOL isIndirect;
-@property (readonly) BOOL isCommon;
-@property (readonly) BOOL isInTextSection;
-@property (readonly) BOOL isInDataSection;
-@property (readonly) BOOL isInBssSection;
-@property (readonly) NSUInteger referenceType;
-@property (readonly) NSString *referenceTypeName;
-@property (readonly) NSString *shortTypeDescription;
-@property (readonly) NSString *longTypeDescription;
+@property (nonatomic, readonly) BOOL isExternal;
+@property (nonatomic, readonly) BOOL isPrivateExternal;
+@property (nonatomic, readonly) NSUInteger stab;
+@property (nonatomic, readonly) NSUInteger type;
+@property (nonatomic, readonly) BOOL isDefined;
+@property (nonatomic, readonly) BOOL isAbsolute;
+@property (nonatomic, readonly) BOOL isInSection;
+@property (nonatomic, readonly) BOOL isPrebound;
+@property (nonatomic, readonly) BOOL isIndirect;
+@property (nonatomic, readonly) BOOL isCommon;
+@property (nonatomic, readonly) BOOL isInTextSection;
+@property (nonatomic, readonly) BOOL isInDataSection;
+@property (nonatomic, readonly) BOOL isInBssSection;
+@property (nonatomic, readonly) NSUInteger referenceType;
+@property (nonatomic, readonly) NSString *referenceTypeName;
+@property (nonatomic, readonly) NSString *shortTypeDescription;
+@property (nonatomic, readonly) NSString *longTypeDescription;
 
-- (NSComparisonResult)compare:(CDSymbol *)aSymbol;
-- (NSComparisonResult)nameCompare:(CDSymbol *)aSymbol;
+- (NSComparisonResult)compare:(CDSymbol *)other;
+- (NSComparisonResult)compareByName:(CDSymbol *)other;
+
++ (NSString *)classNameFromSymbolName:(NSString *)symbolName;
 
 @end

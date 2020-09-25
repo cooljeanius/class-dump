@@ -2,10 +2,41 @@
 
 from datetime import *
 from subprocess import *
+import subprocess
 import glob
 import os
 import sys
-import getopt
+import argparse
+import shlex
+
+# xcodebuild -showsdks
+
+# Mac OS X SDKs:
+#     Mac OS X 10.6                 -sdk macosx10.6
+#     Mac OS X 10.7                 -sdk macosx10.7
+#
+# iOS SDKs:
+#     iOS 5.0                       -sdk iphoneos5.0
+#
+# iOS Simulator SDKs:
+#     Simulator - iOS 4.3           -sdk iphonesimulator4.3
+#     Simulator - iOS 5.0           -sdk iphonesimulator5.0
+
+# xcodebuild -version -sdk iphoneos
+
+# iPhoneOS5.0.sdk - iOS 5.0 (iphoneos5.0)
+# SDKVersion: 5.0
+# Path: /Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS5.0.sdk
+# PlatformVersion: 5.0
+# PlatformPath: /Developer/Platforms/iPhoneOS.platform
+# ProductBuildVersion: 9A334
+# ProductCopyright: 1983-2011 Apple Inc.
+# ProductName: iPhone OS
+# ProductVersion: 5.0
+
+# xcodebuild -version -sdk iphoneos Path
+
+# /Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS5.0.sdk
 
 # ./doTests.py
 # ./doTests.py --ios --sdk-root 4.3
@@ -17,43 +48,62 @@ TESTDIR_NEW = TESTDIR + "/new"
 TESTDIR_NEW_32 = TESTDIR + "/new32"
 TESTDIR_NEW_64 = TESTDIR + "/new64"
 
-OLD_CD = os.path.expanduser("~/Unix/bin/class-dump-30e6db9b3c")
+OLD_CD = os.path.expanduser("~/Unix/bin/class-dump-3.5")
+#OLD_CD = os.path.expanduser("~/Unix/bin/class-dump-e9c13d1")
 #OLD_CD = "/bin/echo"
-NEW_CD = os.path.expanduser("/Local/nygard/Products/Debug/class-dump")
+NEW_CD = os.path.expanduser("/Local/nygard/Debug/class-dump")
 
 # Must be a version that supports --list-arches
-ARCH_CD = os.path.expanduser("/Local/nygard/Products/Debug/class-dump")
+ARCH_CD = os.path.expanduser("/Local/nygard/Debug/class-dump")
 
-mac_frameworks = [
-    "/System/Library/Frameworks/*.framework",
-    "/System/Library/PrivateFrameworks/*.framework",
-    "/Developer/Library/Frameworks/*.framework",
-    "/Developer/Library/PrivateFrameworks/*.framework",
-]
 
-mac_apps = [
-    "/Applications/*.app",
-    "/Applications/*/*.app",
-    "/Applications/Utilities/*.app",
-    "/Developer/Applications/*.app",
-    "/Developer/Applications/*/*.app",
-    "~/Applications/*.app",
-    "/System/Library/CoreServices/*.app",
-]
+try:
+    developer_root = subprocess.check_output(shlex.split("xcode-select --print-path")).rstrip()
+except:
+    developer_root = None
+print "Developer root:", developer_root
 
-mac_bundles = [
-    "/System/Library/CoreServices/*.bundle",
-]
+def mac_frameworks(xcode_path=None):
+    paths = [
+        "/System/Library/Frameworks/*.framework",
+        "/System/Library/PrivateFrameworks/*.framework",
+        ]
+    if developer_root:
+        paths.extend([
+            developer_root + "/Library/Frameworks/*.framework",
+            developer_root + "/Library/PrivateFrameworks/*.framework",
+            developer_root + "/../Frameworks/*.framework",
+            developer_root + "/../OtherFrameworks/*.framework",
+            ])
+    return [os.path.normpath(path) for path in paths]
+
+def mac_apps(xcode_path=None):
+    paths = [
+        "/Applications/*.app",
+        "/Applications/*/*.app",
+        "/Applications/Utilities/*.app",
+        os.path.normpath("~/Applications/*.app"),
+        "/System/Library/CoreServices/*.app",
+        ]
+    if developer_root:
+        paths.extend([
+            developer_root + "/../Applications/*.app",
+            ])
+    return [os.path.normpath(path) for path in paths]
+
+def mac_bundles(xcode_path=None):
+    paths = [
+        "/System/Library/CoreServices/*.bundle",
+        ]
+    if developer_root:
+        paths.extend([
+            developer_root + "/../Plugins/*.ideplugin",
+            ])
+    return [os.path.normpath(path) for path in paths]
 
 #mac_testapps = [
 #    "/Volumes/BigData/TestApplications/*.app",
 #]
-
-def resolve_sdk_root_alias(sdk_root="4.3", dev_root="/Developer"):
-    """ Resolves SDK root alias into full path.  Can also specify dev_root to handle multiple dev tool installations."""
-    if sdk_root in ("3.2", "4.0", "4.1", "4.2", "4.3", "5.0" ):
-        return dev_root + "/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS" + sdk_root + ".sdk"
-    return sdk_root
 
 def build_ios_paths(sdk_root):
     iphone_frameworks = [
@@ -83,33 +133,27 @@ def mkdir_ignore(dir):
     except OSError as e:
         pass
 
-def printUsage():
-    print "doTests.py [--ios] [--sdk-root <path, 4.1, 4.0 or 3.2>] [--dev-root <path>]"
-    print
-    print "    doTests.py --ios --sdk-root 5.0 --dev-root /Xcode42"
-    print
-
 def main(argv):
-    try:
-        opts, args = getopt.getopt(argv, "", ["dev-root=", "sdk-root=", "ios"])
-    except getopt.GetoptError:
-        printUsage()
-        sys.exit(2)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--show-sdks", action="store_true", help="Lists all available SDKs that Xcode knows about (calls xcodebuild -showsdks)")
+    parser.add_argument("--sdk", help="Specify an SDK to use to resolve frameworks")
+    parser.add_argument("--ios", action="store_true", help="Test iOS targets")
+    args = parser.parse_args()
+    print args
 
-    shouldTestIOs = False
+    if args.show_sdks:
+        subprocess.call(shlex.split("xcodebuild  -showsdks"))
+        sys.exit(0)
+
+
     sdk_root = None
-    dev_root = "/Developer"
+    if args.sdk:
+        sdk_root = subprocess.check_output(shlex.split("xcodebuild -version -sdk %s Path" % args.sdk))
+    else:
+        if args.ios:
+            sdk_root = subprocess.check_output(shlex.split("xcodebuild -version -sdk iphoneos Path"))
 
-    for opt, arg in opts:
-        if opt in ("--ios",):
-            shouldTestIOs = True
-        if opt in ("--sdk-root",):
-            sdk_root = arg
-        if opt in ("--dev-root",):
-            dev_root = arg
-
-    sdk_root = resolve_sdk_root_alias(sdk_root, dev_root)
-    #print "Resolved sdk_root:", sdk_root
+    #print "sdk_root:", sdk_root
 
     print "Starting tests at", datetime.today().ctime()
     print
@@ -117,7 +161,7 @@ def main(argv):
     print "New class-dump:", " ".join(Popen("ls -al " + NEW_CD, shell=True, stdout=PIPE).stdout.readlines()),
     print
 
-    if shouldTestIOs:
+    if args.ios:
         print "Testing on iOS targets"
         print
         print "sdk_root:", sdk_root
@@ -132,7 +176,7 @@ def main(argv):
         print "sdk_root:", sdk_root
         if sdk_root:
             print "Ignoring --sdk-root for macosx testing"
-        sdict = dict(apps=mac_apps, frameworks=mac_frameworks, bundles=mac_bundles)
+        sdict = dict(apps=mac_apps(), frameworks=mac_frameworks(), bundles=mac_bundles())
         print_path_dict(sdict)
         print
         OLD_OPTS = []
@@ -148,6 +192,8 @@ def main(argv):
         frameworks.extend(glob.glob(pattern))
     for pattern in sdict["bundles"]:
         bundles.extend(glob.glob(pattern))
+
+    apps = [app for app in apps if not os.path.basename(app).startswith("Hopper")]
 
     print "  Framework count:", len(frameworks)
     print "Application count:", len(apps)
@@ -165,47 +211,51 @@ def main(argv):
     all.extend(bundles)
 
     for path in all:
+        dirname = os.path.dirname(path)
         (base, ext) = os.path.splitext(os.path.basename(path))
         ext = ext.lstrip(".")
-        print base, ext
         proc = Popen([ARCH_CD, "--list-arches", path], shell=False, stdout=PIPE)
         arches = proc.stdout.readline().rstrip().split(" ")
-        print arches
+        print "%-10s %-20s %-40s %s" % (ext, arches, base, dirname)
         proc.stdout.readlines()
+        arch_procs = []
         for arch in arches:
             if arch == "none":
                 command = [OLD_CD, "-s", "-t", path]
                 command.extend(OLD_OPTS)
                 #print command
                 out = open("%s/%s-%s.txt" % (TESTDIR_OLD, base, ext), "w");
-                Popen(command, shell=False, stdout=out, stderr=out)
-                out.close()
+                proc = Popen(command, shell=False, stdout=out, stderr=out)
+                arch_procs.append( (proc, out) )
 
                 command = [NEW_CD, "-s", "-t", path]
                 command.extend(NEW_OPTS)
                 #print command
                 out = open("%s/%s-%s.txt" % (TESTDIR_NEW, base, ext), "w");
-                Popen(command, shell=False, stdout=out, stderr=out)
-                out.close()
+                proc = Popen(command, shell=False, stdout=out, stderr=out)
+                arch_procs.append( (proc, out) )
             else:
-                print arch
-
                 command = [OLD_CD, "-s", "-t", "--arch", arch, path]
                 command.extend(OLD_OPTS)
                 #print command
                 out = open("%s/%s-%s-%s.txt" % (TESTDIR_OLD, base, arch, ext), "w");
-                Popen(command, shell=False, stdout=out, stderr=out)
-                out.close()
+                proc = Popen(command, shell=False, stdout=out, stderr=out)
+                arch_procs.append( (proc, out) )
 
                 command = [NEW_CD, "-s", "-t", "--arch", arch, path]
                 command.extend(NEW_OPTS)
                 #print command
                 out = open("%s/%s-%s-%s.txt" % (TESTDIR_NEW, base, arch, ext), "w");
-                Popen(command, shell=False, stdout=out, stderr=out)
-                out.close()
+                proc = Popen(command, shell=False, stdout=out, stderr=out)
+                arch_procs.append( (proc, out) )
+
+        for proc, out in arch_procs:
+            #print proc, out
+            proc.wait()
+            out.close
 
     print "Ended tests at", datetime.today().ctime()
-    Popen("opendiff %s %s" % (TESTDIR_OLD, TESTDIR_NEW), shell=True)
+    Popen("ksdiff %s %s" % (TESTDIR_OLD, TESTDIR_NEW), shell=True)
 
 #----------------------------------------------------------------------
 #

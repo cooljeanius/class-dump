@@ -8,7 +8,7 @@ using 'otool -ov', but presented as normal Objective-C declarations.
 
 The latest version and information is available at:
 
-    http://www.codethecode.com/projects/class-dump
+    http://stevenygard.com/projects/class-dump
 
 The source code is also available from my Github repository at:
 
@@ -17,9 +17,9 @@ The source code is also available from my Github repository at:
 Usage
 -----
 
-    class-dump 3.3.4 (64 bit)
+    class-dump 3.5 (64 bit)
     Usage: class-dump [options] <mach-o-file>
-    
+
       where options are:
             -a             show instance variable offsets
             -A             show implementation addresses
@@ -60,7 +60,7 @@ License
 
 This file is part of class-dump, a utility for examining the
 Objective-C segment of Mach-O files.
-Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+Copyright (C) 1997-2019 Steve Nygard.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -80,4 +80,4 @@ Contact
 -------
 
 You may contact the author by:
-   e-mail:  class-dump at codethecode.com
+   e-mail:  nygard at gmail.com

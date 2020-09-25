@@ -1,24 +1,16 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDTextClassDumpVisitor.h"
 
-@class CDSymbolReferences;
+#import "CDTypeController.h" // For CDTypeControllerDelegate protocol
 
-@interface CDMultiFileVisitor : CDTextClassDumpVisitor
-{
-    NSString *outputPath;
-    NSUInteger referenceIndex;
-}
+// This generates separate files for each class.  Files are created in the 'outputPath' directory.
 
-@property (retain) NSString *outputPath;
+@interface CDMultiFileVisitor : CDTextClassDumpVisitor <CDTypeControllerDelegate>
 
-- (void)createOutputPathIfNecessary;
-
-- (void)buildClassFrameworks;
-
-- (void)generateStructureHeader;
+@property (strong) NSString *outputPath;
 
 @end

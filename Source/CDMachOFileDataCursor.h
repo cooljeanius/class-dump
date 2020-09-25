@@ -1,24 +1,21 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDDataCursor.h"
 
-@class CDMachOFile, CDLCSegment, CDSection;
+@class CDMachOFile, CDSection;
 
 @interface CDMachOFileDataCursor : CDDataCursor
-{
-    CDMachOFile *nonretained_machOFile;
-}
 
-- (id)initWithFile:(CDMachOFile *)aMachOFile;
-- (id)initWithFile:(CDMachOFile *)aMachOFile offset:(NSUInteger)anOffset;
-- (id)initWithFile:(CDMachOFile *)aMachOFile address:(NSUInteger)anAddress;
+- (id)initWithFile:(CDMachOFile *)machOFile;
+- (id)initWithFile:(CDMachOFile *)machOFile offset:(NSUInteger)offset;
+- (id)initWithFile:(CDMachOFile *)machOFile address:(NSUInteger)address;
 
 - (id)initWithSection:(CDSection *)section;
 
-@property (readonly) CDMachOFile *machOFile;
+@property (nonatomic, weak, readonly) CDMachOFile *machOFile;
 
 - (void)setAddress:(NSUInteger)address;
 
@@ -29,7 +26,7 @@
 
 - (uint32_t)peekInt32;
 
-// Read using the current byteOrder and ptrSize (from the nonretained_machOFile)
+// Read using the current byteOrder and ptrSize (from the machOFile)
 - (uint64_t)readPtr;
 
 @end

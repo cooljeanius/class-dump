@@ -1,107 +1,78 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDFile.h"
 
 #include <mach/machine.h> // For cpu_type_t, cpu_subtype_t
 #include <mach-o/loader.h>
 
-enum {
+typedef enum : NSUInteger {
     CDByteOrder_LittleEndian = 0,
     CDByteOrder_BigEndian = 1,
-};
-typedef NSUInteger CDByteOrder;
+} CDByteOrder;
 
-@class CDLCSegment, CDMachOFileDataCursor;
-@class CDLCDyldInfo, CDLCDylib, CDMachOFile, CDLCSymbolTable, CDLCDynamicSymbolTable, CDLCVersionMinimum;
-
-@protocol CDMachOFileDelegate
-- (void)machOFile:(CDMachOFile *)aMachOFile loadDylib:(CDLCDylib *)aDylibCommand;
-@end
+@class CDLCSegment;
+@class CDLCBuildVersion, CDLCDyldInfo, CDLCDylib, CDMachOFile, CDLCSymbolTable, CDLCDynamicSymbolTable, CDLCVersionMinimum, CDLCSourceVersion;
 
 @interface CDMachOFile : CDFile
-{
-    CDByteOrder byteOrder;
-
-    NSArray *loadCommands;
-    NSArray *dylibLoadCommands;
-    NSArray *segments;
-    CDLCSymbolTable *symbolTable;
-    CDLCDynamicSymbolTable *dynamicSymbolTable;
-    CDLCDyldInfo *dyldInfo;
-    CDLCVersionMinimum *minVersionMacOSX;
-    CDLCVersionMinimum *minVersionIOS;
-    NSArray *runPaths;
-    NSArray *dyldEnvironment;
-    NSArray *reExportedDylibs;
-    struct mach_header_64 header; // 64-bit, also holding 32-bit
-
-    struct {
-        unsigned int uses64BitABI:1;
-    } _flags;
-}
-
-- (id)initWithData:(NSData *)someData archOffset:(NSUInteger)anOffset archSize:(NSUInteger)aSize filename:(NSString *)aFilename searchPathState:(CDSearchPathState *)aSearchPathState;
-
-- (NSString *)description;
-
-- (void)_readLoadCommands:(CDMachOFileDataCursor *)cursor count:(uint32_t)count;
 
 @property (readonly) CDByteOrder byteOrder;
 
-- (CDMachOFile *)machOFileWithArch:(CDArch)arch;
-
 @property (readonly) uint32_t magic;
-@property (readonly) cpu_type_t cputype;
-@property (readonly) cpu_subtype_t cpusubtype;
-@property (readonly) cpu_type_t cputypePlusArchBits;
+@property (assign) cpu_type_t cputype;
+@property (assign) cpu_subtype_t cpusubtype;
 @property (readonly) uint32_t filetype;
 @property (readonly) uint32_t flags;
+
+@property (nonatomic, readonly) cpu_type_t maskedCPUType;
+@property (nonatomic, readonly) cpu_subtype_t maskedCPUSubtype;
 
 @property (readonly) NSArray *loadCommands;
 @property (readonly) NSArray *dylibLoadCommands;
 @property (readonly) NSArray *segments;
 @property (readonly) NSArray *runPaths;
+@property (readonly) NSArray *runPathCommands;
 @property (readonly) NSArray *dyldEnvironment;
 @property (readonly) NSArray *reExportedDylibs;
 
-@property (retain) CDLCSymbolTable *symbolTable;
-@property (retain) CDLCDynamicSymbolTable *dynamicSymbolTable;
-@property (retain) CDLCDyldInfo *dyldInfo;
-@property (retain) CDLCVersionMinimum *minVersionMacOSX;
-@property (retain) CDLCVersionMinimum *minVersionIOS;
+@property (strong) CDLCSymbolTable *symbolTable;
+@property (strong) CDLCDynamicSymbolTable *dynamicSymbolTable;
+@property (strong) CDLCDyldInfo *dyldInfo;
+@property (strong) CDLCDylib *dylibIdentifier;
+@property (strong) CDLCVersionMinimum *minVersionMacOSX;
+@property (strong) CDLCVersionMinimum *minVersionIOS;
+@property (strong) CDLCSourceVersion *sourceVersion;
+@property (strong) CDLCBuildVersion *buildVersion;
 
-- (BOOL)uses64BitABI;
+@property (readonly) BOOL uses64BitABI;
 - (NSUInteger)ptrSize;
 
 - (NSString *)filetypeDescription;
 - (NSString *)flagDescription;
 
-- (CDLCDylib *)dylibIdentifier;
-
+- (CDLCSegment *)dataConstSegment;
 - (CDLCSegment *)segmentWithName:(NSString *)segmentName;
 - (CDLCSegment *)segmentContainingAddress:(NSUInteger)address;
 - (NSString *)stringAtAddress:(NSUInteger)address;
 
-- (NSData *)machOData;
 - (NSUInteger)dataOffsetForAddress:(NSUInteger)address;
 
 - (const void *)bytes;
-- (const void *)bytesAtOffset:(NSUInteger)anOffset;
+- (const void *)bytesAtOffset:(NSUInteger)offset;
 
-- (NSString *)importBaseName;
+@property (nonatomic, readonly) NSString *importBaseName;
 
-@property (readonly) BOOL isEncrypted;
-@property (readonly) BOOL hasProtectedSegments;
-@property (readonly) BOOL canDecryptAllSegments;
+@property (nonatomic, readonly) BOOL isEncrypted;
+@property (nonatomic, readonly) BOOL hasProtectedSegments;
+@property (nonatomic, readonly) BOOL canDecryptAllSegments;
 
 - (NSString *)loadCommandString:(BOOL)isVerbose;
 - (NSString *)headerString:(BOOL)isVerbose;
 
-- (NSString *)uuidString;
-- (NSString *)archName;
+@property (nonatomic, readonly) NSUUID *UUID;
+@property (nonatomic, readonly) NSString *archName;
 
 - (Class)processorClass;
 - (void)logInfoForAddress:(NSUInteger)address;
@@ -113,8 +84,10 @@ typedef NSUInteger CDByteOrder;
 - (BOOL)hasRelocationEntryForAddress2:(NSUInteger)address;
 - (NSString *)externalClassNameForAddress2:(NSUInteger)address;
 
-@property (readonly) BOOL hasObjectiveC1Data;
-@property (readonly) BOOL hasObjectiveC2Data;
-@property (readonly) Class processorClass;
+- (CDLCDylib *)dylibLoadCommandForLibraryOrdinal:(NSUInteger)ordinal;
+
+@property (nonatomic, readonly) BOOL hasObjectiveC1Data;
+@property (nonatomic, readonly) BOOL hasObjectiveC2Data;
+@property (nonatomic, readonly) Class processorClass;
 
 @end

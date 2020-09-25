@@ -1,30 +1,26 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDTypeName.h"
 
 @implementation CDTypeName
+{
+    NSString *_name;
+    NSMutableArray *_templateTypes;
+    NSString *_suffix;
+}
 
 - (id)init;
 {
     if ((self = [super init])) {
-        name = nil;
-        templateTypes = [[NSMutableArray alloc] init];
-        suffix = nil;
+        _name = nil;
+        _templateTypes = [[NSMutableArray alloc] init];
+        _suffix = nil;
     }
 
     return self;
-}
-
-- (void)dealloc;
-{
-    [name release];
-    [templateTypes release];
-    [suffix release];
-
-    [super dealloc];
 }
 
 #pragma mark - NSCopying
@@ -38,7 +34,6 @@
     for (CDTypeName *subtype in self.templateTypes) {
         CDTypeName *subcopy = [subtype copy];
         [copy.templateTypes addObject:subcopy];
-        [subcopy release];
     }
     
     return copy;
@@ -58,8 +53,9 @@
 
 - (NSString *)description;
 {
-    if ([self.templateTypes count] == 0)
-        return name;
+    if ([self.templateTypes count] == 0) {
+        return self.name ? self.name : @"";
+    }
     
     if (self.suffix != nil)
         return [NSString stringWithFormat:@"%@<%@>%@", self.name, [self.templateTypes componentsJoinedByString:@", "], self.suffix];
@@ -68,10 +64,6 @@
 }
 
 #pragma mark -
-
-@synthesize name;
-@synthesize templateTypes;
-@synthesize suffix;
 
 - (BOOL)isTemplateType;
 {

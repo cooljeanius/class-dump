@@ -1,69 +1,102 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDClassFrameworkVisitor.h"
 
+#import "CDMachOFile.h"
 #import "CDOCClass.h"
 #import "CDObjectiveCProcessor.h"
-#import "CDMachOFile.h"
+#import "CDSymbol.h"
+#import "CDLCDylib.h"
+#import "CDOCCategory.h"
+#import "CDOCClassReference.h"
 
-// This builds up a dictionary mapping class names to a framework name.  It is used to generate individual imports when creating separate header files.
+@interface CDClassFrameworkVisitor ()
+@property (strong) NSString *frameworkName;
+@end
+
+#pragma mark -
 
 @implementation CDClassFrameworkVisitor
+{
+    NSMutableDictionary *_frameworkNamesByClassName;
+    NSMutableDictionary *_frameworkNamesByProtocolName;
+    NSString *_frameworkName;
+}
 
 - (id)init;
 {
     if ((self = [super init])) {
-        frameworkNamesByClassName = [[NSMutableDictionary alloc] init];
-        frameworkNamesByProtocolName = [[NSMutableDictionary alloc] init];
-        frameworkName = nil;
+        _frameworkNamesByClassName = [[NSMutableDictionary alloc] init];
+        _frameworkNamesByProtocolName = [[NSMutableDictionary alloc] init];
     }
-
+    
     return self;
-}
-
-- (void)dealloc;
-{
-    [frameworkNamesByClassName release];
-    [frameworkNamesByProtocolName release];
-    [frameworkName release];
-
-    [super dealloc];
 }
 
 #pragma mark -
 
-- (NSDictionary *)frameworkNamesByClassName;
+- (void)willVisitObjectiveCProcessor:(CDObjectiveCProcessor *)processor;
 {
-    return frameworkNamesByClassName;
-}
-
-- (NSDictionary *)frameworkNamesByProtocolName;
-{
-    return frameworkNamesByProtocolName;
-}
-
-@synthesize frameworkName;
-
-- (void)willVisitObjectiveCProcessor:(CDObjectiveCProcessor *)anObjCSegment;
-{
-    [self setFrameworkName:[[anObjCSegment machOFile] importBaseName]];
+    self.frameworkName = processor.machOFile.importBaseName;
 }
 
 - (void)willVisitClass:(CDOCClass *)aClass;
 {
-    if (frameworkName != nil) {
-        [frameworkNamesByClassName setObject:frameworkName forKey:[aClass name]];
+    [self addClassName:aClass.name referencedInFramework:self.frameworkName];
+    
+    // We only need to add superclasses for external classes - classes defined in this binary will be visited on their own
+    CDOCClassReference *superClassRef = [aClass superClassRef];
+    if ([superClassRef isExternalClass] && superClassRef.classSymbol != nil) {
+        [self addClassForExternalSymbol:superClassRef.classSymbol];
     }
 }
 
-- (void)willVisitProtocol:(CDOCProtocol *)aProtocol;
+- (void)willVisitProtocol:(CDOCProtocol *)protocol;
 {
-    if (frameworkName != nil) {
-        [frameworkNamesByProtocolName setObject:frameworkName forKey:[aProtocol name]];
+    // TODO: (2012-02-28) Figure out what frameworks use each protocol, and try to pick the correct one.  More difficult because, for example, NSCopying is found in many frameworks, and picking the last one isn't good enough.  Perhaps a topological sort of the dependancies would be better.
+    [self addProtocolName:protocol.name referencedInFramework:self.frameworkName];
+}
+
+- (void)willVisitCategory:(CDOCCategory *)category;
+{
+    CDOCClassReference *classRef = [category classRef];
+    if ([classRef isExternalClass] && classRef.classSymbol != nil) {
+        [self addClassForExternalSymbol:classRef.classSymbol];
     }
+}
+
+#pragma mark -
+
+- (void)addClassForExternalSymbol:(CDSymbol *)symbol;
+{
+    NSString *frameworkName = CDImportNameForPath([[symbol dylibLoadCommand] path]);
+    NSString *className = [CDSymbol classNameFromSymbolName:[symbol name]];
+    [self addClassName:className referencedInFramework:frameworkName];
+}
+
+- (void)addClassName:(NSString *)name referencedInFramework:(NSString *)frameworkName;
+{
+    if (name != nil && frameworkName != nil)
+        _frameworkNamesByClassName[name] = frameworkName;
+}
+
+- (void)addProtocolName:(NSString *)name referencedInFramework:(NSString *)frameworkName;
+{
+    if (name != nil && frameworkName != nil)
+        _frameworkNamesByProtocolName[name] = frameworkName;
+}
+
+- (NSDictionary *)frameworkNamesByClassName;
+{
+    return [_frameworkNamesByClassName copy];
+}
+
+- (NSDictionary *)frameworkNamesByProtocolName;
+{
+    return [_frameworkNamesByProtocolName copy];
 }
 
 @end

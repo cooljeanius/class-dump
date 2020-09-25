@@ -1,22 +1,21 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDDataCursor.h"
 
 @implementation CDDataCursor
-
-- (id)initWithData:(NSData *)someData;
 {
-    return [self initWithData:someData offset:0];
+    NSData *_data;
+    NSUInteger _offset;
 }
 
-- (id)initWithData:(NSData *)someData offset:(NSUInteger)anOffset;
+- (id)initWithData:(NSData *)data;
 {
     if ((self = [super init])) {
-        data = [someData retain];
-        offset = anOffset;
+        _data = data;
+        _offset = 0;
     }
 
     return self;
@@ -24,32 +23,15 @@
 
 #pragma mark -
 
-- (void)dealloc;
-{
-    [data release];
-
-    [super dealloc];
-}
-
-- (NSData *)data;
-{
-    return data;
-}
-
 - (const void *)bytes;
 {
-    return [data bytes];
-}
-
-- (NSUInteger)offset;
-{
-    return offset;
+    return [_data bytes];
 }
 
 - (void)setOffset:(NSUInteger)newOffset;
 {
-    if (newOffset <= [data length]) {
-        offset = newOffset;
+    if (newOffset <= [_data length]) {
+        _offset = newOffset;
     } else {
         [NSException raise:NSRangeException format:@"Trying to seek past end of data."];
     }
@@ -57,33 +39,42 @@
 
 - (void)advanceByLength:(NSUInteger)length;
 {
-    [self setOffset:offset + length];
+    if (_offset + length <= [_data length]) {
+        _offset += length;
+    } else {
+        [NSException raise:NSRangeException format:@"Trying to advance past end of data."];
+    }
 }
 
 - (NSUInteger)remaining;
 {
-    return [data length] - offset;
+    return [_data length] - _offset;
 }
 
 #pragma mark -
 
 - (uint8_t)readByte;
 {
-    const uint8_t *ptr;
+    uint8_t result;
 
-    ptr = [data bytes] + offset;
-    offset += 1;
+    if (_offset + sizeof(result) <= [_data length]) {
+        result = OSReadLittleInt16([_data bytes], _offset) & 0xFF;
+        _offset += sizeof(result);
+    } else {
+        [NSException raise:NSRangeException format:@"Trying to read past end in %s", __cmd];
+        result = 0;
+    }
 
-    return *ptr;
+    return result;
 }
 
 - (uint16_t)readLittleInt16;
 {
     uint16_t result;
 
-    if (offset + sizeof(result) <= [data length]) {
-        result = OSReadLittleInt16([data bytes], offset);
-        offset += sizeof(result);
+    if (_offset + sizeof(result) <= [_data length]) {
+        result = OSReadLittleInt16([_data bytes], _offset);
+        _offset += sizeof(result);
     } else {
         [NSException raise:NSRangeException format:@"Trying to read past end in %s", __cmd];
         result = 0;
@@ -96,9 +87,9 @@
 {
     uint32_t result;
 
-    if (offset + sizeof(result) <= [data length]) {
-        result = OSReadLittleInt32([data bytes], offset);
-        offset += sizeof(result);
+    if (_offset + sizeof(result) <= [_data length]) {
+        result = OSReadLittleInt32([_data bytes], _offset);
+        _offset += sizeof(result);
     } else {
         [NSException raise:NSRangeException format:@"Trying to read past end in %s", __cmd];
         result = 0;
@@ -111,9 +102,11 @@
 {
     uint64_t result;
 
-    if (offset + sizeof(result) <= [data length]) {
-        result = OSReadLittleInt64([data bytes], offset);
-        offset += sizeof(result);
+    if (_offset + sizeof(result) <= [_data length]) {
+//        uint8_t *ptr = [_data bytes] + _offset;
+//        NSLog(@"%016llx: %02x %02x %02x %02x %02x %02x %02x %02x", _offset, ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], ptr[6], ptr[7]);
+        result = OSReadLittleInt64([_data bytes], _offset);
+        _offset += sizeof(result);
     } else {
         [NSException raise:NSRangeException format:@"Trying to read past end in %s", __cmd];
         result = 0;
@@ -126,9 +119,9 @@
 {
     uint16_t result;
 
-    if (offset + sizeof(result) <= [data length]) {
-        result = OSReadBigInt16([data bytes], offset);
-        offset += sizeof(result);
+    if (_offset + sizeof(result) <= [_data length]) {
+        result = OSReadBigInt16([_data bytes], _offset);
+        _offset += sizeof(result);
     } else {
         [NSException raise:NSRangeException format:@"Trying to read past end in %s", __cmd];
         result = 0;
@@ -141,9 +134,9 @@
 {
     uint32_t result;
 
-    if (offset + sizeof(result) <= [data length]) {
-        result = OSReadBigInt32([data bytes], offset);
-        offset += sizeof(result);
+    if (_offset + sizeof(result) <= [_data length]) {
+        result = OSReadBigInt32([_data bytes], _offset);
+        _offset += sizeof(result);
     } else {
         [NSException raise:NSRangeException format:@"Trying to read past end in %s", __cmd];
         result = 0;
@@ -156,9 +149,9 @@
 {
     uint64_t result;
 
-    if (offset + sizeof(result) <= [data length]) {
-        result = OSReadBigInt64([data bytes], offset);
-        offset += sizeof(result);
+    if (_offset + sizeof(result) <= [_data length]) {
+        result = OSReadBigInt64([_data bytes], _offset);
+        _offset += sizeof(result);
     } else {
         [NSException raise:NSRangeException format:@"Trying to read past end in %s", __cmd];
         result = 0;
@@ -197,11 +190,11 @@
     return dval;
 }
 
-- (void)appendBytesOfLength:(NSUInteger)length intoData:(NSMutableData *)targetData;
+- (void)appendBytesOfLength:(NSUInteger)length intoData:(NSMutableData *)data;
 {
-    if (offset + length <= [data length]) {
-        [targetData appendBytes:[data bytes] + offset length:length];
-        offset += length;
+    if (_offset + length <= [_data length]) {
+        [data appendBytes:(uint8_t *)[_data bytes] + _offset length:length];
+        _offset += length;
     } else {
         [NSException raise:NSRangeException format:@"Trying to read past end in %s", __cmd];
     }
@@ -209,9 +202,9 @@
 
 - (void)readBytesOfLength:(NSUInteger)length intoBuffer:(void *)buf;
 {
-    if (offset + length <= [data length]) {
-        memcpy(buf, [data bytes] + offset, length);
-        offset += length;
+    if (_offset + length <= [_data length]) {
+        memcpy(buf, (uint8_t *)[_data bytes] + _offset, length);
+        _offset += length;
     } else {
         [NSException raise:NSRangeException format:@"Trying to read past end in %s", __cmd];
     }
@@ -219,17 +212,17 @@
 
 - (BOOL)isAtEnd;
 {
-    return offset >= [data length];
+    return _offset >= [_data length];
 }
 
 - (NSString *)readCString;
 {
-    return [self readStringOfLength:strlen([data bytes] + offset) encoding:NSASCIIStringEncoding];
+    return [self readStringOfLength:strlen((const char *)[_data bytes] + _offset) encoding:NSASCIIStringEncoding];
 }
 
 - (NSString *)readStringOfLength:(NSUInteger)length encoding:(NSStringEncoding)encoding;
 {
-    if (offset + length <= [data length]) {
+    if (_offset + length <= [_data length]) {
         NSString *str;
 
         if (encoding == NSASCIIStringEncoding) {
@@ -242,16 +235,16 @@
                 return nil;
             }
 
-            strncpy(buf, [data bytes] + offset, length);
+            strncpy(buf, (const char *)[_data bytes] + _offset, length);
             buf[length] = 0;
 
-            str = [[[NSString alloc] initWithBytes:buf length:strlen(buf) encoding:encoding] autorelease];
-            offset += length;
+            str = [[NSString alloc] initWithBytes:buf length:strlen(buf) encoding:encoding];
+            _offset += length;
             free(buf);
             return str;
         } else {
-            str = [[[NSString alloc] initWithBytes:[data bytes] + offset length:length encoding:encoding] autorelease];;
-            offset += length;
+            str = [[NSString alloc] initWithBytes:(uint8_t *)[_data bytes] + _offset length:length encoding:encoding];
+            _offset += length;
             return str;
         }
     } else {

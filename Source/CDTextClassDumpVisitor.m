@@ -1,179 +1,230 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDTextClassDumpVisitor.h"
 
-#include <mach-o/arch.h>
-
-#import "NSArray-Extensions.h"
 #import "CDClassDump.h"
-#import "CDObjectiveC1Processor.h"
-#import "CDMachOFile.h"
-#import "CDOCProtocol.h"
-#import "CDLCDylib.h"
 #import "CDOCClass.h"
 #import "CDOCCategory.h"
-#import "CDSymbolReferences.h"
 #import "CDOCMethod.h"
 #import "CDOCProperty.h"
-#import "CDTypeFormatter.h"
 #import "CDTypeController.h"
+#import "CDTypeFormatter.h"
 #import "CDVisitorPropertyState.h"
+#import "CDOCInstanceVariable.h"
 
 static BOOL debug = NO;
 
+@interface CDTextClassDumpVisitor ()
+@end
+
+#pragma mark -
+
 @implementation CDTextClassDumpVisitor
+{
+    NSMutableString *_resultString;
+}
 
 - (id)init;
 {
     if ((self = [super init])) {
-        resultString = [[NSMutableString alloc] init];
-        symbolReferences = [[CDSymbolReferences alloc] init];
+        _resultString = [[NSMutableString alloc] init];
     }
 
     return self;
 }
 
-- (void)dealloc;
-{
-    [resultString release];
-    [symbolReferences release];
-
-    [super dealloc];
-}
-
 #pragma mark -
-
-- (void)writeResultToStandardOutput;
-{
-    NSData *data = [resultString dataUsingEncoding:NSUTF8StringEncoding];
-    [(NSFileHandle *)[NSFileHandle fileHandleWithStandardOutput] writeData:data];
-}
 
 - (void)willVisitClass:(CDOCClass *)aClass;
 {
-    if ([aClass isExported] == NO)
-        [resultString appendString:@"// Not exported\n"];
+    if (aClass.isExported == NO)
+        [self.resultString appendString:@"__attribute__((visibility(\"hidden\")))\n"];
 
-    [resultString appendFormat:@"@interface %@", [aClass name]];
-    if ([aClass superClassName] != nil)
-        [resultString appendFormat:@" : %@", [aClass superClassName]];
+    [self.resultString appendFormat:@"@interface %@", aClass.name];
+    if (aClass.superClassName != nil)
+        [self.resultString appendFormat:@" : %@", aClass.superClassName];
 
-    NSArray *protocols = [aClass protocols];
+    NSArray *protocols = aClass.protocols;
     if ([protocols count] > 0) {
-        [resultString appendFormat:@" <%@>", [[protocols arrayByMappingSelector:@selector(name)] componentsJoinedByString:@", "]];
-        [symbolReferences addProtocolNamesFromArray:[protocols arrayByMappingSelector:@selector(name)]];
+        [self.resultString appendFormat:@" <%@>", aClass.protocolsString];
     }
 
-    [resultString appendString:@"\n"];
+    [self.resultString appendString:@"\n"];
 }
 
 - (void)didVisitClass:(CDOCClass *)aClass;
 {
-    if ([aClass hasMethods])
-        [resultString appendString:@"\n"];
+    if (aClass.hasMethods)
+        [self.resultString appendString:@"\n"];
 
-    [resultString appendString:@"@end\n\n"];
+    [self.resultString appendString:@"@end\n\n"];
 }
 
 - (void)willVisitIvarsOfClass:(CDOCClass *)aClass;
 {
-    [resultString appendString:@"{\n"];
+    [self.resultString appendString:@"{\n"];
 }
 
 - (void)didVisitIvarsOfClass:(CDOCClass *)aClass;
 {
-    [resultString appendString:@"}\n\n"];
+    [self.resultString appendString:@"}\n\n"];
 }
 
-- (void)willVisitCategory:(CDOCCategory *)aCategory;
+- (void)willVisitCategory:(CDOCCategory *)category;
 {
-    NSArray *protocols;
+    [self.resultString appendFormat:@"@interface %@ (%@)", category.className, category.name];
 
-    [resultString appendFormat:@"@interface %@ (%@)", [aCategory className], [aCategory name]];
-
-    protocols = [aCategory protocols];
+    NSArray *protocols = category.protocols;
     if ([protocols count] > 0) {
-        [resultString appendFormat:@" <%@>", [[protocols arrayByMappingSelector:@selector(name)] componentsJoinedByString:@", "]];
-        [symbolReferences addProtocolNamesFromArray:[protocols arrayByMappingSelector:@selector(name)]];
+        [self.resultString appendFormat:@" <%@>", category.protocolsString];
     }
 
-    [resultString appendString:@"\n"];
+    [self.resultString appendString:@"\n"];
 }
 
-- (void)didVisitCategory:(CDOCCategory *)aCategory;
+- (void)didVisitCategory:(CDOCCategory *)category;
 {
-    [resultString appendString:@"@end\n\n"];
+    [self.resultString appendString:@"@end\n\n"];
 }
 
-- (void)willVisitProtocol:(CDOCProtocol *)aProtocol;
+- (void)willVisitProtocol:(CDOCProtocol *)protocol;
 {
-    [resultString appendFormat:@"@protocol %@", [aProtocol name]];
+    [self.resultString appendFormat:@"@protocol %@", protocol.name];
 
-    NSArray *protocols = [aProtocol protocols];
+    NSArray *protocols = protocol.protocols;
     if ([protocols count] > 0) {
-        [resultString appendFormat:@" <%@>", [[protocols arrayByMappingSelector:@selector(name)] componentsJoinedByString:@", "]];
-        [symbolReferences addProtocolNamesFromArray:[protocols arrayByMappingSelector:@selector(name)]];
+        [self.resultString appendFormat:@" <%@>", protocol.protocolsString];
     }
 
-    [resultString appendString:@"\n"];
+    [self.resultString appendString:@"\n"];
 }
 
 - (void)willVisitOptionalMethods;
 {
-    [resultString appendString:@"\n@optional\n"];
+    [self.resultString appendString:@"\n@optional\n"];
 }
 
-- (void)didVisitProtocol:(CDOCProtocol *)aProtocol;
+- (void)didVisitProtocol:(CDOCProtocol *)protocol;
 {
-    [resultString appendString:@"@end\n\n"];
+    [self.resultString appendString:@"@end\n\n"];
 }
 
-- (void)visitClassMethod:(CDOCMethod *)aMethod;
+- (void)visitClassMethod:(CDOCMethod *)method;
 {
-    [resultString appendString:@"+ "];
-    [aMethod appendToString:resultString typeController:[classDump typeController] symbolReferences:symbolReferences];
-    [resultString appendString:@"\n"];
+    [self.resultString appendString:@"+ "];
+    [method appendToString:self.resultString typeController:self.classDump.typeController];
+    [self.resultString appendString:@"\n"];
 }
 
-- (void)visitInstanceMethod:(CDOCMethod *)aMethod propertyState:(CDVisitorPropertyState *)propertyState;
+- (void)visitInstanceMethod:(CDOCMethod *)method propertyState:(CDVisitorPropertyState *)propertyState;
 {
-    CDOCProperty *property = [propertyState propertyForAccessor:[aMethod name]];
+    CDOCProperty *property = [propertyState propertyForAccessor:method.name];
     if (property == nil) {
-        //NSLog(@"No property for method: %@", [aMethod name]);
-        [resultString appendString:@"- "];
-        [aMethod appendToString:resultString typeController:[classDump typeController] symbolReferences:symbolReferences];
-        [resultString appendString:@"\n"];
+        //NSLog(@"No property for method: %@", method.name);
+        [self.resultString appendString:@"- "];
+        [method appendToString:self.resultString typeController:self.classDump.typeController];
+        [self.resultString appendString:@"\n"];
     } else {
         if ([propertyState hasUsedProperty:property] == NO) {
-            //NSLog(@"Emitting property %@ triggered by method %@", [property name], [aMethod name]);
+            //NSLog(@"Emitting property %@ triggered by method %@", property.name, method.name);
             [self visitProperty:property];
             [propertyState useProperty:property];
         } else {
-            //NSLog(@"Have already emitted property %@ triggered by method %@", [property name], [aMethod name]);
+            //NSLog(@"Have already emitted property %@ triggered by method %@", property.name, method.name);
         }
     }
 }
 
-- (void)visitIvar:(CDOCIvar *)anIvar;
+- (void)visitIvar:(CDOCInstanceVariable *)ivar;
 {
-    [anIvar appendToString:resultString typeController:[classDump typeController] symbolReferences:symbolReferences];
-    [resultString appendString:@"\n"];
+    [ivar appendToString:self.resultString typeController:self.classDump.typeController];
+    [self.resultString appendString:@"\n"];
 }
 
-- (void)_visitProperty:(CDOCProperty *)aProperty parsedType:(CDType *)parsedType attributes:(NSArray *)attrs;
+- (void)visitProperty:(CDOCProperty *)property;
+{
+    CDType *parsedType = property.type;
+    if (parsedType == nil) {
+        if ([property.attributeString hasPrefix:@"T"]) {
+            [self.resultString appendFormat:@"// Error parsing type for property %@:\n", property.name];
+            [self.resultString appendFormat:@"// Property attributes: %@\n\n", property.attributeString];
+        } else {
+            [self.resultString appendFormat:@"// Error: Property attributes should begin with the type ('T') attribute, property name: %@\n", property.name];
+            [self.resultString appendFormat:@"// Property attributes: %@\n\n", property.attributeString];
+        }
+    } else {
+        [self _visitProperty:property parsedType:parsedType attributes:property.attributes];
+    }
+}
+
+- (void)didVisitPropertiesOfClass:(CDOCClass *)aClass;
+{
+    if ([aClass.properties count] > 0)
+        [self.resultString appendString:@"\n"];
+}
+
+- (void)willVisitPropertiesOfCategory:(CDOCCategory *)category;
+{
+    if ([category.properties count] > 0)
+        [self.resultString appendString:@"\n"];
+}
+
+- (void)didVisitPropertiesOfCategory:(CDOCCategory *)category;
+{
+    if ([category.properties count] > 0/* && [aCategory hasMethods]*/)
+        [self.resultString appendString:@"\n"];
+}
+
+- (void)willVisitPropertiesOfProtocol:(CDOCProtocol *)protocol;
+{
+    if ([protocol.properties count] > 0)
+        [self.resultString appendString:@"\n"];
+}
+
+- (void)didVisitPropertiesOfProtocol:(CDOCProtocol *)protocol;
+{
+    if ([protocol.properties count] > 0 /*&& [aProtocol hasMethods]*/)
+        [self.resultString appendString:@"\n"];
+}
+
+- (void)visitRemainingProperties:(CDVisitorPropertyState *)propertyState;
+{
+    NSArray *remaining = propertyState.remainingProperties;
+
+    if ([remaining count] > 0) {
+        [self.resultString appendString:@"\n"];
+        [self.resultString appendFormat:@"// Remaining properties\n"];
+        //NSLog(@"Warning: remaining undeclared property count: %u", [remaining count]);
+        //NSLog(@"remaining: %@", remaining);
+        for (CDOCProperty *property in remaining)
+            [self visitProperty:property];
+    }
+}
+
+#pragma mark -
+
+@synthesize resultString = _resultString;
+
+- (void)writeResultToStandardOutput;
+{
+    NSData *data = [self.resultString dataUsingEncoding:NSUTF8StringEncoding];
+    [(NSFileHandle *)[NSFileHandle fileHandleWithStandardOutput] writeData:data];
+}
+
+- (void)_visitProperty:(CDOCProperty *)property parsedType:(CDType *)parsedType attributes:(NSArray *)attrs;
 {
     NSString *backingVar = nil;
     BOOL isWeak = NO;
     BOOL isDynamic = NO;
-
+    
     NSMutableArray *alist = [[NSMutableArray alloc] init];
     NSMutableArray *unknownAttrs = [[NSMutableArray alloc] init];
-
+    
     // objc_v2_encode_prop_attr() in gcc/objc/objc-act.c
-
+    
     for (NSString *attr in attrs) {
         if ([attr hasPrefix:@"T"]) {
             if (debug) NSLog(@"Warning: Property attribute 'T' should occur only occur at the beginning");
@@ -209,112 +260,37 @@ static BOOL debug = NO;
             [unknownAttrs addObject:attr];
         }
     }
-
+    
     if ([alist count] > 0) {
-        [resultString appendFormat:@"@property(%@) ", [alist componentsJoinedByString:@", "]];
+        [self.resultString appendFormat:@"@property(%@) ", [alist componentsJoinedByString:@", "]];
     } else {
-        [resultString appendString:@"@property "];
+        [self.resultString appendString:@"@property "];
     }
-
+    
     if (isWeak)
-        [resultString appendString:@"__weak "];
-
-    NSString *formattedString = [[[classDump typeController] propertyTypeFormatter] formatVariable:[aProperty name] parsedType:parsedType symbolReferences:symbolReferences];
-    [resultString appendFormat:@"%@;", formattedString];
-
+        [self.resultString appendString:@"__weak "];
+    
+    NSString *formattedString = [self.classDump.typeController.propertyTypeFormatter formatVariable:property.name type:parsedType];
+    [self.resultString appendFormat:@"%@;", formattedString];
+    
     if (isDynamic) {
-        [resultString appendFormat:@" // @dynamic %@;", [aProperty name]];
+        [self.resultString appendFormat:@" // @dynamic %@;", property.name];
     } else if (backingVar != nil) {
-        if ([backingVar isEqualToString:[aProperty name]]) {
-            [resultString appendFormat:@" // @synthesize %@;", [aProperty name]];
+        if ([backingVar isEqualToString:property.name]) {
+            [self.resultString appendFormat:@" // @synthesize %@;", property.name];
         } else {
-            [resultString appendFormat:@" // @synthesize %@=%@;", [aProperty name], backingVar];
+            [self.resultString appendFormat:@" // @synthesize %@=%@;", property.name, backingVar];
         }
     }
-
-    [resultString appendString:@"\n"];
+    
+    [self.resultString appendString:@"\n"];
     if ([unknownAttrs count] > 0) {
-        [resultString appendFormat:@"// Preceding property had unknown attributes: %@\n", [unknownAttrs componentsJoinedByString:@","]];
-        if ([[aProperty attributeString] length] > 80) {
-            [resultString appendFormat:@"// Original attribute string (following type): %@\n\n", [aProperty attributeStringAfterType]];
+        [self.resultString appendFormat:@"// Preceding property had unknown attributes: %@\n", [unknownAttrs componentsJoinedByString:@","]];
+        if ([property.attributeString length] > 80) {
+            [self.resultString appendFormat:@"// Original attribute string (following type): %@\n\n", property.attributeStringAfterType];
         } else {
-            [resultString appendFormat:@"// Original attribute string: %@\n\n", [aProperty attributeString]];
+            [self.resultString appendFormat:@"// Original attribute string: %@\n\n", property.attributeString];
         }
-    }
-
-    [alist release];
-    [unknownAttrs release];
-}
-
-- (void)visitProperty:(CDOCProperty *)aProperty;
-{
-    CDType *parsedType = [aProperty type];
-    if (parsedType == nil) {
-        if ([[aProperty attributeString] hasPrefix:@"T"]) {
-            [resultString appendFormat:@"// Error parsing type for property %@:\n", [aProperty name]];
-            [resultString appendFormat:@"// Property attributes: %@\n\n", [aProperty attributeString]];
-        } else {
-            [resultString appendFormat:@"// Error: Property attributes should begin with the type ('T') attribute, property name: %@\n", [aProperty name]];
-            [resultString appendFormat:@"// Property attributes: %@\n\n", [aProperty attributeString]];
-        }
-    } else {
-        [self _visitProperty:aProperty parsedType:parsedType attributes:[aProperty attributes]];
-    }
-}
-
-#define ADD_SPACE
-
-- (void)didVisitPropertiesOfClass:(CDOCClass *)aClass;
-{
-#ifdef ADD_SPACE
-    if ([[aClass properties] count] > 0)
-        [resultString appendString:@"\n"];
-#endif
-}
-
-- (void)willVisitPropertiesOfCategory:(CDOCCategory *)aCategory;
-{
-#ifdef ADD_SPACE
-    if ([[aCategory properties] count] > 0)
-        [resultString appendString:@"\n"];
-#endif
-}
-
-- (void)didVisitPropertiesOfCategory:(CDOCCategory *)aCategory;
-{
-#ifdef ADD_SPACE
-    if ([[aCategory properties] count] > 0/* && [aCategory hasMethods]*/)
-        [resultString appendString:@"\n"];
-#endif
-}
-
-- (void)willVisitPropertiesOfProtocol:(CDOCProtocol *)aProtocol;
-{
-#ifdef ADD_SPACE
-    if ([[aProtocol properties] count] > 0)
-        [resultString appendString:@"\n"];
-#endif
-}
-
-- (void)didVisitPropertiesOfProtocol:(CDOCProtocol *)aProtocol;
-{
-#ifdef ADD_SPACE
-    if ([[aProtocol properties] count] > 0 /*&& [aProtocol hasMethods]*/)
-        [resultString appendString:@"\n"];
-#endif
-}
-
-- (void)visitRemainingProperties:(CDVisitorPropertyState *)propertyState;
-{
-    NSArray *remaining = [propertyState remainingProperties];
-
-    if ([remaining count] > 0) {
-        [resultString appendString:@"\n"];
-        [resultString appendFormat:@"// Remaining properties\n"];
-        //NSLog(@"Warning: remaining undeclared property count: %u", [remaining count]);
-        //NSLog(@"remaining: %@", remaining);
-        for (CDOCProperty *property in remaining)
-            [self visitProperty:property];
     }
 }
 

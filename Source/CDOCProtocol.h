@@ -1,64 +1,50 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
-#import <Foundation/Foundation.h>
-
-@class CDClassDump, CDSymbolReferences, CDTypeController;
+@class CDTypeController;
 @class CDVisitor, CDVisitorPropertyState;
 @class CDOCMethod, CDOCProperty;
 
 @interface CDOCProtocol : NSObject
-{
-    NSString *name;
-    NSMutableArray *protocols;
-    NSMutableArray *classMethods;
-    NSMutableArray *instanceMethods;
-    NSMutableArray *optionalClassMethods;
-    NSMutableArray *optionalInstanceMethods;
-    NSMutableArray *properties;
 
-    NSMutableSet *adoptedProtocolNames;
-}
+@property (strong) NSString *name;
 
-- (id)init;
+@property (readonly) NSArray *protocols;
+- (void)addProtocol:(CDOCProtocol *)protocol;
+- (void)removeProtocol:(CDOCProtocol *)protocol;
+@property (nonatomic, readonly) NSArray *protocolNames;
+@property (nonatomic, readonly) NSString *protocolsString;
 
-- (NSString *)description;
-
-@property (retain) NSString *name;
-
-- (NSArray *)protocols;
-- (void)addProtocol:(CDOCProtocol *)aProtocol;
-- (void)removeProtocol:(CDOCProtocol *)aProtocol;
-
-- (NSArray *)classMethods;
+@property (nonatomic, readonly) NSArray *classMethods; // TODO: NSArray vs. NSMutableArray
 - (void)addClassMethod:(CDOCMethod *)method;
 
-- (NSArray *)instanceMethods;
+@property (nonatomic, readonly) NSArray *instanceMethods;
 - (void)addInstanceMethod:(CDOCMethod *)method;
 
-- (NSArray *)optionalClassMethods;
+@property (nonatomic, readonly) NSArray *optionalClassMethods;
 - (void)addOptionalClassMethod:(CDOCMethod *)method;
 
-- (NSArray *)optionalInstanceMethods;
+@property (nonatomic, readonly) NSArray *optionalInstanceMethods;
 - (void)addOptionalInstanceMethod:(CDOCMethod *)method;
 
-- (NSArray *)properties;
+@property (nonatomic, readonly) NSArray *properties;
 - (void)addProperty:(CDOCProperty *)property;
 
-- (BOOL)hasMethods;
+@property (nonatomic, readonly) BOOL hasMethods;
 
 - (void)registerTypesWithObject:(CDTypeController *)typeController phase:(NSUInteger)phase;
 - (void)registerTypesFromMethods:(NSArray *)methods withObject:(CDTypeController *)typeController phase:(NSUInteger)phase;
 
-@property (readonly) NSString *sortableName;
-- (NSComparisonResult)ascendingCompareByName:(CDOCProtocol *)otherProtocol;
+- (NSComparisonResult)ascendingCompareByName:(CDOCProtocol *)other;
 
-- (NSString *)findTag:(CDSymbolReferences *)symbolReferences;
+- (NSString *)methodSearchContext;
+- (void)recursivelyVisit:(CDVisitor *)visitor;
 
-- (void)recursivelyVisit:(CDVisitor *)aVisitor;
-- (void)visitMethods:(CDVisitor *)aVisitor propertyState:(CDVisitorPropertyState *)propertyState;
-- (void)visitProperties:(CDVisitor *)aVisitor;
+- (void)visitMethods:(CDVisitor *)visitor propertyState:(CDVisitorPropertyState *)propertyState;
+
+- (void)mergeMethodsFromProtocol:(CDOCProtocol *)other;
+- (void)mergePropertiesFromProtocol:(CDOCProtocol *)other;
 
 @end

@@ -1,24 +1,17 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
-
-#import <Foundation/Foundation.h>
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 @interface CDDataCursor : NSObject
-{
-    NSData *data;
-    NSUInteger offset;
-}
 
-- (id)initWithData:(NSData *)someData;
-- (id)initWithData:(NSData *)someData offset:(NSUInteger)anOffset;
+- (id)initWithData:(NSData *)data;
 
-- (NSData *)data;
+@property (readonly) NSData *data;
 - (const void *)bytes;
 
-- (NSUInteger)offset;
-- (void)setOffset:(NSUInteger)newOffset;
+@property (nonatomic, assign) NSUInteger offset;
+
 - (void)advanceByLength:(NSUInteger)length;
 - (NSUInteger)remaining;
 
@@ -38,7 +31,7 @@
 - (double)readLittleFloat64;
 //- (double)readBigFloat64;
 
-- (void)appendBytesOfLength:(NSUInteger)length intoData:(NSMutableData *)targetData;
+- (void)appendBytesOfLength:(NSUInteger)length intoData:(NSMutableData *)data;
 - (void)readBytesOfLength:(NSUInteger)length intoBuffer:(void *)buf;
 - (BOOL)isAtEnd;
 

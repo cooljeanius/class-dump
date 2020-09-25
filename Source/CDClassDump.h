@@ -1,19 +1,11 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
-#import <Foundation/Foundation.h>
-
-#include <sys/types.h>
-#include <regex.h>
 #import "CDFile.h" // For CDArch
 
-#ifdef __LP64__
-#define CLASS_DUMP_BASE_VERSION "3.3.4 (64 bit)"
-#else
-#define CLASS_DUMP_BASE_VERSION "3.3.4 (32 bit)"
-#endif
+#define CLASS_DUMP_BASE_VERSION "3.5 (64 bit)"
 
 #ifdef DEBUG
 #define CLASS_DUMP_VERSION CLASS_DUMP_BASE_VERSION " (Debug version compiled " __DATE__ " " __TIME__ ")"
@@ -21,36 +13,12 @@
 #define CLASS_DUMP_VERSION CLASS_DUMP_BASE_VERSION
 #endif
 
-@class CDLCDylib, CDFile, CDMachOFile;
-@class CDSymbolReferences, CDType, CDTypeController, CDTypeFormatter;
+@class CDFile;
+@class CDTypeController;
 @class CDVisitor;
 @class CDSearchPathState;
 
 @interface CDClassDump : NSObject
-{
-    CDSearchPathState *searchPathState;
-
-    BOOL shouldProcessRecursively;
-    BOOL shouldSortClasses; // And categories, protocols
-    BOOL shouldSortClassesByInheritance; // And categories, protocols
-    BOOL shouldSortMethods;
-    
-    BOOL shouldShowIvarOffsets;
-    BOOL shouldShowMethodAddresses;
-    BOOL shouldShowHeader;
-
-    BOOL shouldMatchRegex;
-    regex_t compiledRegex;
-
-    NSString *sdkRoot;
-    NSMutableArray *machOFiles;
-    NSMutableDictionary *machOFilesByID;
-    NSMutableArray *objcProcessors;
-
-    CDTypeController *typeController;
-
-    CDArch targetArch;
-}
 
 @property (readonly) CDSearchPathState *searchPathState;
 
@@ -62,29 +30,26 @@
 @property (assign) BOOL shouldShowMethodAddresses;
 @property (assign) BOOL shouldShowHeader;
 
-@property (nonatomic, assign) BOOL shouldMatchRegex;
-- (BOOL)setRegex:(char *)regexCString errorMessage:(NSString **)errorMessagePointer;
-- (BOOL)regexMatchesString:(NSString *)aString;
+@property (strong) NSRegularExpression *regularExpression;
+- (BOOL)shouldShowName:(NSString *)name;
 
-@property (retain) NSString *sdkRoot;
+@property (strong) NSString *sdkRoot;
 
 @property (readonly) NSArray *machOFiles;
 @property (readonly) NSArray *objcProcessors;
 
 @property (assign) CDArch targetArch;
 
-@property (readonly) BOOL containsObjectiveCData;
-@property (readonly) BOOL hasEncryptedFiles;
-@property (readonly) BOOL hasObjectiveCRuntimeInfo;
+@property (nonatomic, readonly) BOOL containsObjectiveCData;
+@property (nonatomic, readonly) BOOL hasEncryptedFiles;
+@property (nonatomic, readonly) BOOL hasObjectiveCRuntimeInfo;
 
 @property (readonly) CDTypeController *typeController;
 
-- (BOOL)loadFile:(CDFile *)aFile;
+- (BOOL)loadFile:(CDFile *)file error:(NSError **)error;
 - (void)processObjectiveCData;
 
-- (void)recursivelyVisit:(CDVisitor *)aVisitor;
-
-- (CDMachOFile *)machOFileWithID:(NSString *)anID;
+- (void)recursivelyVisit:(CDVisitor *)visitor;
 
 - (void)appendHeaderToString:(NSMutableString *)resultString;
 
@@ -94,3 +59,8 @@
 - (void)showLoadCommands;
 
 @end
+
+extern NSString *CDErrorDomain_ClassDump;
+extern NSString *CDErrorKey_Exception;
+
+

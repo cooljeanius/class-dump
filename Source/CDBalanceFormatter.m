@@ -1,36 +1,30 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDBalanceFormatter.h"
-
-#import "NSString-Extensions.h"
 
 static BOOL debug = NO;
 
 @implementation CDBalanceFormatter
+{
+    NSScanner *_scanner;
+    NSCharacterSet *_openCloseSet;
+    
+    NSMutableString *_result;
+}
 
 - (id)initWithString:(NSString *)str;
 {
     if ((self = [super init])) {
-        scanner = [[NSScanner alloc] initWithString:str];
-        openCloseSet = [[NSCharacterSet characterSetWithCharactersInString:@"{}<>()"] retain];
+        _scanner = [[NSScanner alloc] initWithString:str];
+        _openCloseSet = [NSCharacterSet characterSetWithCharactersInString:@"{}<>()"];
         
-        result = [[NSMutableString alloc] init];
+        _result = [[NSMutableString alloc] init];
     }
 
     return self;
-}
-
-- (void)dealloc;
-{
-    [scanner release];
-    [openCloseSet release];
-
-    [result release];
-
-    [super dealloc];
 }
 
 #pragma mark -
@@ -42,37 +36,35 @@ static BOOL debug = NO;
     BOOL foundOpen = NO;
     BOOL foundClose = NO;
 
-    NSArray *pairs = [[NSArray alloc] initWithObjects:@"{}", @"<>", @"()", nil];
-
-    while ([scanner isAtEnd] == NO) {
+    while ([_scanner isAtEnd] == NO) {
         NSString *pre;
 
-        if ([scanner scanUpToCharactersFromSet:openCloseSet intoString:&pre]) {
+        if ([_scanner scanUpToCharactersFromSet:_openCloseSet intoString:&pre]) {
             if (debug) NSLog(@"pre = '%@'", pre);
-            [result appendFormat:@"%@%@\n", [NSString spacesIndentedToLevel:level], pre];
+            [_result appendFormat:@"%@%@\n", [NSString spacesIndentedToLevel:level], pre];
         }
-        if (debug) NSLog(@"remaining: '%@'", [[scanner string] substringFromIndex:[scanner scanLocation]]);
+        if (debug) NSLog(@"remaining: '%@'", [[_scanner string] substringFromIndex:[_scanner scanLocation]]);
 
         foundOpen = foundClose = NO;
         for (NSUInteger index = 0; index < 3; index++) {
             if (debug) NSLog(@"Checking open %lu: '%@'", index, opens[index]);
-            if ([scanner scanString:opens[index] intoString:NULL]) {
+            if ([_scanner scanString:opens[index] intoString:NULL]) {
                 if (debug) NSLog(@"Start %@", opens[index]);
-                [result appendSpacesIndentedToLevel:level];
-                [result appendString:opens[index]];
-                [result appendString:@"\n"];
+                [_result appendSpacesIndentedToLevel:level];
+                [_result appendString:opens[index]];
+                [_result appendString:@"\n"];
 
-                [self parse:opens[index] index:[scanner scanLocation] - 1 level:level + 1];
+                [self parse:opens[index] index:[_scanner scanLocation] - 1 level:level + 1];
 
-                [result appendSpacesIndentedToLevel:level];
-                [result appendString:closes[index]];
-                [result appendString:@"\n"];
+                [_result appendSpacesIndentedToLevel:level];
+                [_result appendString:closes[index]];
+                [_result appendString:@"\n"];
                 foundOpen = YES;
                 break;
             }
 
             if (debug) NSLog(@"Checking close %lu: '%@'", index, closes[index]);
-            if ([scanner scanString:closes[index] intoString:NULL]) {
+            if ([_scanner scanString:closes[index] intoString:NULL]) {
                 if ([open isEqualToString:opens[index]]) {
                     if (debug) NSLog(@"End %@", closes[index]);
                 } else {
@@ -84,24 +76,22 @@ static BOOL debug = NO;
         }
 
         if (foundOpen == NO && foundClose == NO) {
-            if (debug) NSLog(@"Unknown @ %lu: %@", [scanner scanLocation], [[scanner string] substringFromIndex:[scanner scanLocation]]);
+            if (debug) NSLog(@"Unknown @ %lu: %@", [_scanner scanLocation], [[_scanner string] substringFromIndex:[_scanner scanLocation]]);
             break;
         }
 
         if (foundClose)
             break;
     }
-
-    [pairs release];
 }
 
 - (NSString *)format;
 {
     [self parse:nil index:0 level:0];
 
-    if (debug) NSLog(@"result:\n%@", result);
+    if (debug) NSLog(@"result:\n%@", _result);
 
-    return [NSString stringWithString:result];
+    return [NSString stringWithString:_result];
 }
 
 @end

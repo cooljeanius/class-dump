@@ -1,7 +1,7 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #include <stdio.h>
 #include <libc.h>
@@ -9,9 +9,6 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <mach-o/arch.h>
-
-#import <Foundation/Foundation.h>
-#import "NSString-Extensions.h"
 
 #import "CDClassDump.h"
 #import "CDFindMethodVisitor.h"
@@ -32,7 +29,7 @@ void print_usage(void)
             "  where options are:\n"
             "        -a             show instance variable offsets\n"
             "        -A             show implementation addresses\n"
-            "        --arch <arch>  choose a specific architecture from a universal binary (ppc, ppc64, i386, x86_64)\n"
+            "        --arch <arch>  choose a specific architecture from a universal binary (ppc, ppc64, i386, x86_64, armv6, armv7, armv7s, arm64)\n"
             "        -C <regex>     only display classes matching regular expression\n"
             "        -f <str>       find string in method name\n"
             "        -H             generate header files in current directory, or directory specified with -o\n"
@@ -43,8 +40,10 @@ void print_usage(void)
             "        -S             sort methods by name\n"
             "        -t             suppress header in output, for testing\n"
             "        --list-arches  list the arches in the file, then exit\n"
-            "        --sdk-ios      specify iOS SDK version (will look in /Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS<version>.sdk\n"
-            "        --sdk-mac      specify Mac OS X version (will look in /Developer/SDKs/MacOSX<version>.sdk\n"
+            "        --sdk-ios      specify iOS SDK version (will look for /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS<version>.sdk\n"
+            "                       or /Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS<version>.sdk)\n"
+            "        --sdk-mac      specify Mac OS X version (will look for /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX<version>.sdk\n"
+            "                       or /Developer/SDKs/MacOSX<version>.sdk)\n"
             "        --sdk-root     specify the full SDK root path (or use --sdk-ios/--sdk-mac for a shortcut)\n"
             ,
             CLASS_DUMP_VERSION
@@ -57,282 +56,281 @@ void print_usage(void)
 #define CD_OPT_SDK_IOS     4
 #define CD_OPT_SDK_MAC     5
 #define CD_OPT_SDK_ROOT    6
+#define CD_OPT_HIDE        7
 
 int main(int argc, char *argv[])
 {
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    @autoreleasepool {
+        NSString *searchString;
+        BOOL shouldGenerateSeparateHeaders = NO;
+        BOOL shouldListArches = NO;
+        BOOL shouldPrintVersion = NO;
+        CDArch targetArch;
+        BOOL hasSpecifiedArch = NO;
+        NSString *outputPath;
+        NSMutableSet *hiddenSections = [NSMutableSet set];
 
-    BOOL shouldFind = NO;
-    NSString *searchString = nil;
-    BOOL shouldGenerateSeparateHeaders = NO;
-    BOOL shouldListArches = NO;
-    BOOL shouldPrintVersion = NO;
-    CDArch targetArch;
-    BOOL hasSpecifiedArch = NO;
+        int ch;
+        BOOL errorFlag = NO;
 
-    int ch;
-    BOOL errorFlag = NO;
+        struct option longopts[] = {
+            { "show-ivar-offsets",       no_argument,       NULL, 'a' },
+            { "show-imp-addr",           no_argument,       NULL, 'A' },
+            { "match",                   required_argument, NULL, 'C' },
+            { "find",                    required_argument, NULL, 'f' },
+            { "generate-multiple-files", no_argument,       NULL, 'H' },
+            { "sort-by-inheritance",     no_argument,       NULL, 'I' },
+            { "output-dir",              required_argument, NULL, 'o' },
+            { "recursive",               no_argument,       NULL, 'r' },
+            { "sort",                    no_argument,       NULL, 's' },
+            { "sort-methods",            no_argument,       NULL, 'S' },
+            { "arch",                    required_argument, NULL, CD_OPT_ARCH },
+            { "list-arches",             no_argument,       NULL, CD_OPT_LIST_ARCHES },
+            { "suppress-header",         no_argument,       NULL, 't' },
+            { "version",                 no_argument,       NULL, CD_OPT_VERSION },
+            { "sdk-ios",                 required_argument, NULL, CD_OPT_SDK_IOS },
+            { "sdk-mac",                 required_argument, NULL, CD_OPT_SDK_MAC },
+            { "sdk-root",                required_argument, NULL, CD_OPT_SDK_ROOT },
+            { "hide",                    required_argument, NULL, CD_OPT_HIDE },
+            { NULL,                      0,                 NULL, 0 },
+        };
 
-    struct option longopts[] = {
-        { "show-ivar-offsets",       no_argument,       NULL, 'a' },
-        { "show-imp-addr",           no_argument,       NULL, 'A' },
-        { "match",                   required_argument, NULL, 'C' },
-        { "find",                    required_argument, NULL, 'f' },
-        { "generate-multiple-files", no_argument,       NULL, 'H' },
-        { "sort-by-inheritance",     no_argument,       NULL, 'I' },
-        { "output-dir",              required_argument, NULL, 'o' },
-        { "recursive",               no_argument,       NULL, 'r' },
-        { "sort",                    no_argument,       NULL, 's' },
-        { "sort-methods",            no_argument,       NULL, 'S' },
-        { "arch",                    required_argument, NULL, CD_OPT_ARCH },
-        { "list-arches",             no_argument,       NULL, CD_OPT_LIST_ARCHES },
-        { "suppress-header",         no_argument,       NULL, 't' },
-        { "version",                 no_argument,       NULL, CD_OPT_VERSION },
-        { "sdk-ios",                 required_argument, NULL, CD_OPT_SDK_IOS },
-        { "sdk-mac",                 required_argument, NULL, CD_OPT_SDK_MAC },
-        { "sdk-root",                required_argument, NULL, CD_OPT_SDK_ROOT },
-        { NULL,                      0,                 NULL, 0 },
-    };
-
-    if (argc == 1) {
-        print_usage();
-        exit(0);
-    }
-
-    CDClassDump *classDump = [[[CDClassDump alloc] init] autorelease];
-    CDMultiFileVisitor *multiFileVisitor = [[[CDMultiFileVisitor alloc] init] autorelease];
-    multiFileVisitor.classDump = classDump;
-
-    while ( (ch = getopt_long(argc, argv, "aAC:f:HIo:rRsSt", longopts, NULL)) != -1) {
-        switch (ch) {
-            case CD_OPT_ARCH: {
-                NSString *name = [NSString stringWithUTF8String:optarg];
-                targetArch = CDArchFromName(name);
-                if (targetArch.cputype != CPU_TYPE_ANY)
-                    hasSpecifiedArch = YES;
-                else {
-                    fprintf(stderr, "Error: Unknown arch %s\n\n", optarg);
-                    errorFlag = YES;
-                }
-                break;
-            }
-                
-            case CD_OPT_LIST_ARCHES:
-                shouldListArches = YES;
-                break;
-                
-            case CD_OPT_VERSION:
-                shouldPrintVersion = YES;
-                break;
-                
-            case CD_OPT_SDK_IOS: {
-                NSString *root = [NSString stringWithUTF8String:optarg];
-                //NSLog(@"root: %@", root);
-                NSString *str = [NSString stringWithFormat:@"/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS%@.sdk", root];
-                classDump.sdkRoot = str;
-                
-                break;
-            }
-                
-            case CD_OPT_SDK_MAC: {
-                NSString *root = [NSString stringWithUTF8String:optarg];
-                //NSLog(@"root: %@", root);
-                NSString *str = [NSString stringWithFormat:@"/Developer/SDKs/MacOSX%@.sdk", root];
-                classDump.sdkRoot = str;
-                
-                break;
-            }
-                
-            case CD_OPT_SDK_ROOT: {
-                NSString *root = [NSString stringWithUTF8String:optarg];
-                //NSLog(@"root: %@", root);
-                classDump.sdkRoot = root;
-                
-                break;
-            }
-                
-            case 'a':
-                classDump.shouldShowIvarOffsets = YES;
-                break;
-                
-            case 'A':
-                classDump.shouldShowMethodAddresses = YES;
-                break;
-                
-            case 'C': {
-                NSString *errorMessage;
-                
-                if ([classDump setRegex:optarg errorMessage:&errorMessage] == NO) {
-                    fprintf(stderr, "class-dump: Error with regex: '%s'\n\n", [errorMessage UTF8String]);
-                    errorFlag = YES;
-                }
-                // Last one wins now.
-                break;
-            }
-                
-            case 'f': {
-                shouldFind = YES;
-                
-                searchString = [NSString stringWithUTF8String:optarg];
-                break;
-            }
-                
-            case 'H':
-                shouldGenerateSeparateHeaders = YES;
-                break;
-                
-            case 'I':
-                classDump.shouldSortClassesByInheritance = YES;
-                break;
-                
-            case 'o':
-                multiFileVisitor.outputPath = [NSString stringWithUTF8String:optarg];
-                break;
-                
-            case 'r':
-                classDump.shouldProcessRecursively = YES;
-                break;
-                
-            case 's':
-                classDump.shouldSortClasses = YES;
-                break;
-                
-            case 'S':
-                classDump.shouldSortMethods = YES;
-                break;
-                
-            case 't':
-                classDump.shouldShowHeader = NO;
-                break;
-                
-            case '?':
-            default:
-                errorFlag = YES;
-                break;
+        if (argc == 1) {
+            print_usage();
+            exit(0);
         }
-    }
 
-    if (errorFlag) {
-        print_usage();
-        exit(2);
-    }
+        CDClassDump *classDump = [[CDClassDump alloc] init];
 
-    if (shouldPrintVersion) {
-        printf("class-dump %s compiled %s\n", CLASS_DUMP_VERSION, __DATE__ " " __TIME__);
-        exit(0);
-    }
+        while ( (ch = getopt_long(argc, argv, "aAC:f:HIo:rRsSt", longopts, NULL)) != -1) {
+            switch (ch) {
+                case CD_OPT_ARCH: {
+                    NSString *name = [NSString stringWithUTF8String:optarg];
+                    targetArch = CDArchFromName(name);
+                    if (targetArch.cputype != CPU_TYPE_ANY)
+                        hasSpecifiedArch = YES;
+                    else {
+                        fprintf(stderr, "Error: Unknown arch %s\n\n", optarg);
+                        errorFlag = YES;
+                    }
+                    break;
+                }
+                    
+                case CD_OPT_LIST_ARCHES:
+                    shouldListArches = YES;
+                    break;
+                    
+                case CD_OPT_VERSION:
+                    shouldPrintVersion = YES;
+                    break;
+                    
+                case CD_OPT_SDK_IOS: {
+                    NSString *root = [NSString stringWithUTF8String:optarg];
+                    //NSLog(@"root: %@", root);
+                    NSString *str;
+                    if ([[NSFileManager defaultManager] fileExistsAtPath: @"/Applications/Xcode.app"]) {
+                        str = [NSString stringWithFormat:@"/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS%@.sdk", root];
+                    } else if ([[NSFileManager defaultManager] fileExistsAtPath: @"/Developer"]) {
+                        str = [NSString stringWithFormat:@"/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS%@.sdk", root];
+                    }
+                    classDump.sdkRoot = str;
+                    
+                    break;
+                }
+                    
+                case CD_OPT_SDK_MAC: {
+                    NSString *root = [NSString stringWithUTF8String:optarg];
+                    //NSLog(@"root: %@", root);
+                    NSString *str;
+                    if ([[NSFileManager defaultManager] fileExistsAtPath: @"/Applications/Xcode.app"]) {
+                        str = [NSString stringWithFormat:@"/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX%@.sdk", root];
+                    } else if ([[NSFileManager defaultManager] fileExistsAtPath: @"/Developer"]) {
+                        str = [NSString stringWithFormat:@"/Developer/SDKs/MacOSX%@.sdk", root];
+                    }
+                    classDump.sdkRoot = str;
+                    
+                    break;
+                }
+                    
+                case CD_OPT_SDK_ROOT: {
+                    NSString *root = [NSString stringWithUTF8String:optarg];
+                    //NSLog(@"root: %@", root);
+                    classDump.sdkRoot = root;
+                    
+                    break;
+                }
+                    
+                case CD_OPT_HIDE: {
+                    NSString *str = [NSString stringWithUTF8String:optarg];
+                    if ([str isEqualToString:@"all"]) {
+                        [hiddenSections addObject:@"structures"];
+                        [hiddenSections addObject:@"protocols"];
+                    } else {
+                        [hiddenSections addObject:str];
+                    }
+                    break;
+                }
+                    
+                case 'a':
+                    classDump.shouldShowIvarOffsets = YES;
+                    break;
+                    
+                case 'A':
+                    classDump.shouldShowMethodAddresses = YES;
+                    break;
+                    
+                case 'C': {
+                    NSError *error;
+                    NSRegularExpression *regularExpression = [NSRegularExpression regularExpressionWithPattern:[NSString stringWithUTF8String:optarg]
+                                                                                                       options:(NSRegularExpressionOptions)0
+                                                                                                         error:&error];
+                    if (regularExpression != nil) {
+                        classDump.regularExpression = regularExpression;
+                    } else {
+                        fprintf(stderr, "class-dump: Error with regular expression: %s\n\n", [[error localizedFailureReason] UTF8String]);
+                        errorFlag = YES;
+                    }
 
-    if (optind < argc) {
-        NSString *arg = [NSString stringWithFileSystemRepresentation:argv[optind]];
-        NSString *executablePath = [arg executablePathForFilename];
-        if (shouldListArches) {
-            if (executablePath == nil) {
-                printf("none\n");
-            } else {
-                CDSearchPathState *searchPathState = [[[CDSearchPathState alloc] init] autorelease];
-                searchPathState.executablePath = executablePath;
-                NSData *data = [[NSData alloc] initWithContentsOfMappedFile:executablePath];
-                id macho = [CDFile fileWithData:data filename:executablePath searchPathState:searchPathState];
-                if (macho == nil) {
+                    // Last one wins now.
+                    break;
+                }
+                    
+                case 'f': {
+                    searchString = [NSString stringWithUTF8String:optarg];
+                    break;
+                }
+                    
+                case 'H':
+                    shouldGenerateSeparateHeaders = YES;
+                    break;
+                    
+                case 'I':
+                    classDump.shouldSortClassesByInheritance = YES;
+                    break;
+                    
+                case 'o':
+                    outputPath = [NSString stringWithUTF8String:optarg];
+                    break;
+                    
+                case 'r':
+                    classDump.shouldProcessRecursively = YES;
+                    break;
+                    
+                case 's':
+                    classDump.shouldSortClasses = YES;
+                    break;
+                    
+                case 'S':
+                    classDump.shouldSortMethods = YES;
+                    break;
+                    
+                case 't':
+                    classDump.shouldShowHeader = NO;
+                    break;
+                    
+                case '?':
+                default:
+                    errorFlag = YES;
+                    break;
+            }
+        }
+
+        if (errorFlag) {
+            print_usage();
+            exit(2);
+        }
+
+        if (shouldPrintVersion) {
+            printf("class-dump %s compiled %s\n", CLASS_DUMP_VERSION, __DATE__ " " __TIME__);
+            exit(0);
+        }
+
+        if (optind < argc) {
+            NSString *arg = [NSString stringWithFileSystemRepresentation:argv[optind]];
+            NSString *executablePath = [arg executablePathForFilename];
+            if (shouldListArches) {
+                if (executablePath == nil) {
                     printf("none\n");
                 } else {
-                    if ([macho isKindOfClass:[CDMachOFile class]]) {
-                        printf("%s\n", [[macho archName] UTF8String]);
-                    } else if ([macho isKindOfClass:[CDFatFile class]]) {
-                        printf("%s\n", [[[macho archNames] componentsJoinedByString:@" "] UTF8String]);
+                    CDSearchPathState *searchPathState = [[CDSearchPathState alloc] init];
+                    searchPathState.executablePath = executablePath;
+                    id macho = [CDFile fileWithContentsOfFile:executablePath searchPathState:searchPathState];
+                    if (macho == nil) {
+                        printf("none\n");
+                    } else {
+                        if ([macho isKindOfClass:[CDMachOFile class]]) {
+                            printf("%s\n", [[macho archName] UTF8String]);
+                        } else if ([macho isKindOfClass:[CDFatFile class]]) {
+                            printf("%s\n", [[[macho archNames] componentsJoinedByString:@" "] UTF8String]);
+                        }
                     }
                 }
-                [data release];
-            }
-        } else {
-            if (executablePath == nil) {
-                fprintf(stderr, "class-dump: Input file (%s) doesn't contain an executable.\n", [arg fileSystemRepresentation]);
-                exit(1);
-            }
-
-            NSData *data = [[NSData alloc] initWithContentsOfMappedFile:executablePath];
-            if (data == nil) {
-                NSFileManager *defaultManager = [NSFileManager defaultManager];
-
-                if ([defaultManager fileExistsAtPath:executablePath]) {
-                    fprintf(stderr, "class-dump: Input file (%s) is not readable (check read rights).\n", [executablePath UTF8String]);
-                } else {
-                    fprintf(stderr, "class-dump: Input file (%s) does not exist.\n", [executablePath UTF8String]);
-                }
-
-                exit(1);
-            }
-
-            classDump.searchPathState.executablePath = [executablePath stringByDeletingLastPathComponent];
-            CDFile *file = [CDFile fileWithData:data filename:executablePath searchPathState:classDump.searchPathState];
-            if (file == nil) {
-                fprintf(stderr, "class-dump: Input file (%s) is neither a Mach-O file nor a fat archive.\n", [executablePath UTF8String]);
-                [data release];
-                exit(1);
-            }
-#if 0
-            {
-                CDFatFile *fat = file;
-
-                NSArray *a1 = [fat arches];
-                NSUInteger count = [a1 count];
-                for (NSUInteger index = 0; index < count; index++)
-                    [[[a1 objectAtIndex:index] machOData] writeToFile:[NSString stringWithFormat:@"/tmp/arch-%u", index] atomically:NO];
-
-                exit(99);
-            }
-#endif
-            if (hasSpecifiedArch == NO) {
-                if ([file bestMatchForLocalArch:&targetArch] == NO) {
-                    fprintf(stderr, "Error: Couldn't get local architecture\n");
+            } else {
+                if (executablePath == nil) {
+                    fprintf(stderr, "class-dump: Input file (%s) doesn't contain an executable.\n", [arg fileSystemRepresentation]);
                     exit(1);
                 }
-                //NSLog(@"No arch specified, best match for local arch is: (%08x, %08x)", targetArch.cputype, targetArch.cpusubtype);
-            } else {
-                //NSLog(@"chosen arch is: (%08x, %08x)", targetArch.cputype, targetArch.cpusubtype);
-            }
 
-#ifndef __LP64__
-            if (CDArchUses64BitABI(targetArch)) {
-                fprintf(stderr, "Error: Can't dump 64-bit files with 32-bit version of class-dump\n");
-                exit(1);
-            }
-#endif
+                classDump.searchPathState.executablePath = [executablePath stringByDeletingLastPathComponent];
+                CDFile *file = [CDFile fileWithContentsOfFile:executablePath searchPathState:classDump.searchPathState];
+                if (file == nil) {
+                    NSFileManager *defaultManager = [NSFileManager defaultManager];
+                    
+                    if ([defaultManager fileExistsAtPath:executablePath]) {
+                        if ([defaultManager isReadableFileAtPath:executablePath]) {
+                            fprintf(stderr, "class-dump: Input file (%s) is neither a Mach-O file nor a fat archive.\n", [executablePath UTF8String]);
+                        } else {
+                            fprintf(stderr, "class-dump: Input file (%s) is not readable (check read permissions).\n", [executablePath UTF8String]);
+                        }
+                    } else {
+                        fprintf(stderr, "class-dump: Input file (%s) does not exist.\n", [executablePath UTF8String]);
+                    }
 
-            [classDump setTargetArch:targetArch];
-            classDump.searchPathState.executablePath = [executablePath stringByDeletingLastPathComponent];
+                    exit(1);
+                }
 
-            if ([classDump loadFile:file]) {
-#if 0
-                [classDump showHeader];
-                [classDump showLoadCommands];
-                exit(5);
-#endif
-
-                [classDump processObjectiveCData];
-                [classDump registerTypes];
-
-                if (shouldFind) {
-                    CDFindMethodVisitor *visitor = [[CDFindMethodVisitor alloc] init];
-                    visitor.classDump = classDump;
-                    visitor.findString = searchString;
-                    [classDump recursivelyVisit:visitor];
-                    [visitor release];
-                } else if (shouldGenerateSeparateHeaders) {
-                    [classDump recursivelyVisit:multiFileVisitor];
+                if (hasSpecifiedArch == NO) {
+                    if ([file bestMatchForLocalArch:&targetArch] == NO) {
+                        fprintf(stderr, "Error: Couldn't get local architecture\n");
+                        exit(1);
+                    }
+                    //NSLog(@"No arch specified, best match for local arch is: (%08x, %08x)", targetArch.cputype, targetArch.cpusubtype);
                 } else {
-                    CDClassDumpVisitor *visitor = [[CDClassDumpVisitor alloc] init];
-                    visitor.classDump = classDump;
-                    [classDump recursivelyVisit:visitor];
-                    [visitor release];
+                    //NSLog(@"chosen arch is: (%08x, %08x)", targetArch.cputype, targetArch.cpusubtype);
+                }
+
+                classDump.targetArch = targetArch;
+                classDump.searchPathState.executablePath = [executablePath stringByDeletingLastPathComponent];
+
+                NSError *error;
+                if (![classDump loadFile:file error:&error]) {
+                    fprintf(stderr, "Error: %s\n", [[error localizedFailureReason] UTF8String]);
+                    exit(1);
+                } else {
+                    [classDump processObjectiveCData];
+                    [classDump registerTypes];
+                    
+                    if (searchString != nil) {
+                        CDFindMethodVisitor *visitor = [[CDFindMethodVisitor alloc] init];
+                        visitor.classDump = classDump;
+                        visitor.searchString = searchString;
+                        [classDump recursivelyVisit:visitor];
+                    } else if (shouldGenerateSeparateHeaders) {
+                        CDMultiFileVisitor *multiFileVisitor = [[CDMultiFileVisitor alloc] init];
+                        multiFileVisitor.classDump = classDump;
+                        classDump.typeController.delegate = multiFileVisitor;
+                        multiFileVisitor.outputPath = outputPath;
+                        [classDump recursivelyVisit:multiFileVisitor];
+                    } else {
+                        CDClassDumpVisitor *visitor = [[CDClassDumpVisitor alloc] init];
+                        visitor.classDump = classDump;
+                        if ([hiddenSections containsObject:@"structures"]) visitor.shouldShowStructureSection = NO;
+                        if ([hiddenSections containsObject:@"protocols"])  visitor.shouldShowProtocolSection  = NO;
+                        [classDump recursivelyVisit:visitor];
+                    }
                 }
             }
-
-            [data release];
         }
+        exit(0); // avoid costly autorelease pool drain, we’re exiting anyway
     }
-
-    [pool release];
-
-    return 0;
 }

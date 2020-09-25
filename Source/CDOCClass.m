@@ -1,41 +1,34 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDOCClass.h"
 
-#import "NSArray-Extensions.h"
 #import "CDClassDump.h"
-#import "CDOCIvar.h"
+#import "CDOCInstanceVariable.h"
 #import "CDOCMethod.h"
-#import "CDSymbolReferences.h"
 #import "CDType.h"
 #import "CDTypeController.h"
 #import "CDTypeParser.h"
 #import "CDVisitor.h"
 #import "CDVisitorPropertyState.h"
+#import "CDOCClassReference.h"
 
 @implementation CDOCClass
+{
+    NSArray *_instanceVariables;
+
+    BOOL _isExported;
+}
 
 - (id)init;
 {
     if ((self = [super init])) {
-        superClassName = nil;
-        ivars = nil;
-        
-        isExported = YES;
+        _isExported = YES;
     }
 
     return self;
-}
-
-- (void)dealloc;
-{
-    [superClassName release];
-    [ivars release];
-
-    [super dealloc];
 }
 
 #pragma mark - Debugging
@@ -47,20 +40,21 @@
 
 #pragma mark -
 
-@synthesize superClassName;
-@synthesize ivars;
-@synthesize isExported;
+- (NSString *)superClassName;
+{
+    return [_superClassRef className];
+}
 
 - (void)registerTypesWithObject:(CDTypeController *)typeController phase:(NSUInteger)phase;
 {
     [super registerTypesWithObject:typeController phase:phase];
 
-    for (CDOCIvar *ivar in self.ivars) {
-        [[ivar parsedType] phase:phase registerTypesWithObject:typeController usedInMethod:NO];
+    for (CDOCInstanceVariable *instanceVariable in self.instanceVariables) {
+        [instanceVariable.type phase:phase registerTypesWithObject:typeController usedInMethod:NO];
     }
 }
 
-- (NSString *)findTag:(CDSymbolReferences *)symbolReferences;
+- (NSString *)methodSearchContext;
 {
     NSMutableString *resultString = [NSMutableString string];
 
@@ -68,37 +62,33 @@
     if (self.superClassName != nil)
         [resultString appendFormat:@" : %@", self.superClassName];
 
-    if ([protocols count] > 0)
-        [resultString appendFormat:@" <%@>", [[protocols arrayByMappingSelector:@selector(name)] componentsJoinedByString:@", "]];
+    if ([self.protocols count] > 0)
+        [resultString appendFormat:@" <%@>", self.protocolsString];
 
     return resultString;
 }
 
-- (void)recursivelyVisit:(CDVisitor *)aVisitor;
+- (void)recursivelyVisit:(CDVisitor *)visitor;
 {
-    if ([[aVisitor classDump] shouldMatchRegex] && [[aVisitor classDump] regexMatchesString:[self name]] == NO)
-        return;
-
-    // Wonderful.  Need to typecast because there's also -[NSHTTPCookie initWithProperties:] that takes a dictionary.
-    CDVisitorPropertyState *propertyState = [(CDVisitorPropertyState *)[CDVisitorPropertyState alloc] initWithProperties:[self properties]];
-
-    [aVisitor willVisitClass:self];
-
-    [aVisitor willVisitIvarsOfClass:self];
-    for (CDOCIvar *ivar in ivars)
-        [aVisitor visitIvar:ivar];
-    [aVisitor didVisitIvarsOfClass:self];
-
-    //[aVisitor willVisitPropertiesOfClass:self];
-    //[self visitProperties:aVisitor];
-    //[aVisitor didVisitPropertiesOfClass:self];
-
-    [self visitMethods:aVisitor propertyState:propertyState];
-    // Should mostly be dynamic properties
-    [aVisitor visitRemainingProperties:propertyState];
-    [aVisitor didVisitClass:self];
-
-    [propertyState release];
+    if ([visitor.classDump shouldShowName:self.name]) {
+        CDVisitorPropertyState *propertyState = [[CDVisitorPropertyState alloc] initWithProperties:self.properties];
+        
+        [visitor willVisitClass:self];
+        
+        [visitor willVisitIvarsOfClass:self];
+        for (CDOCInstanceVariable *instanceVariable in self.instanceVariables)
+            [visitor visitIvar:instanceVariable];
+        [visitor didVisitIvarsOfClass:self];
+        
+        //[visitor willVisitPropertiesOfClass:self];
+        //[self visitProperties:visitor];
+        //[visitor didVisitPropertiesOfClass:self];
+        
+        [self visitMethods:visitor propertyState:propertyState];
+        // Should mostly be dynamic properties
+        [visitor visitRemainingProperties:propertyState];
+        [visitor didVisitClass:self];
+    }
 }
 
 #pragma mark - CDTopologicalSort protocol
@@ -111,9 +101,9 @@
 - (NSArray *)dependancies;
 {
     if (self.superClassName == nil)
-        return [NSArray array];
+        return @[];
 
-    return [NSArray arrayWithObject:self.superClassName];
+    return @[self.superClassName];
 }
 
 @end

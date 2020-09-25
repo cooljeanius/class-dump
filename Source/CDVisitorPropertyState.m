@@ -1,68 +1,69 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDVisitorPropertyState.h"
 
 #import "CDOCProperty.h"
 
+@interface CDVisitorPropertyState ()
+@end
+
+#pragma mark -
+
 @implementation CDVisitorPropertyState
+{
+    NSMutableDictionary *_propertiesByAccessor; // NSString (accessor)       -> CDOCProperty
+    NSMutableDictionary *_propertiesByName;     // NSString (property name)  -> CDOCProperty
+}
 
 - (id)initWithProperties:(NSArray *)properties;
 {
     if ((self = [super init])) {
-        propertiesByAccessor = [[NSMutableDictionary alloc] init];
-        propertiesByName = [[NSMutableDictionary alloc] init];
+        _propertiesByAccessor = [[NSMutableDictionary alloc] init];
+        _propertiesByName = [[NSMutableDictionary alloc] init];
         
         for (CDOCProperty *property in properties) {
             //NSLog(@"property: %@, getter: %@, setter: %@", [property name], [property getter], [property setter]);
-            [propertiesByName setObject:property forKey:property.name];
-            [propertiesByAccessor setObject:property forKey:property.getter];
-            if ([property isReadOnly] == NO)
-                [propertiesByAccessor setObject:property forKey:property.setter];
+            _propertiesByName[property.name] = property;
+            _propertiesByAccessor[property.getter] = property;
+            if (property.isReadOnly == NO)
+                _propertiesByAccessor[property.setter] = property;
         }
     }
 
     return self;
 }
 
-- (void)dealloc;
-{
-    [propertiesByAccessor release];
-    [propertiesByName release];
-
-    [super dealloc];
-}
-
 #pragma mark - Debugging
 
 - (void)log;
 {
-    NSLog(@"propertiesByAccessor: %@", propertiesByAccessor);
-    NSLog(@"propertiesByName: %@", propertiesByName);
+    NSLog(@"propertiesByAccessor: %@", _propertiesByAccessor);
+    NSLog(@"propertiesByName: %@", _propertiesByName);
 }
 
 #pragma mark -
 
 - (CDOCProperty *)propertyForAccessor:(NSString *)str;
 {
-    return [propertiesByAccessor objectForKey:str];
+    return _propertiesByAccessor[str];
 }
 
 - (BOOL)hasUsedProperty:(CDOCProperty *)property;
 {
-    return [propertiesByName objectForKey:property.name] == nil;
+    return _propertiesByName[property.name] == nil;
 }
 
 - (void)useProperty:(CDOCProperty *)property;
 {
-    [propertiesByName removeObjectForKey:property.name];
+    [_propertiesByName removeObjectForKey:property.name];
 }
 
 - (NSArray *)remainingProperties;
 {
-    return [[propertiesByName allValues] sortedArrayUsingSelector:@selector(ascendingCompareByName:)];
+    return [[_propertiesByName allValues] sortedArrayUsingSelector:@selector(ascendingCompareByName:)];
 }
 
 @end

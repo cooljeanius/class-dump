@@ -1,10 +1,11 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDLoadCommand.h"
 
+#import "CDLCBuildVersion.h"
 #import "CDLCDyldInfo.h"
 #import "CDLCDylib.h"
 #import "CDLCDylinker.h"
@@ -17,8 +18,7 @@
 #import "CDLCRoutines32.h"
 #import "CDLCRoutines64.h"
 #import "CDLCRunPath.h"
-#import "CDLCSegment32.h"
-#import "CDLCSegment64.h"
+#import "CDLCSegment.h"
 #import "CDLCSubClient.h"
 #import "CDLCSubFramework.h"
 #import "CDLCSubLibrary.h"
@@ -31,7 +31,15 @@
 #import "CDLCVersionMinimum.h"
 #import "CDMachOFile.h"
 
+#import "CDLCMain.h"
+#import "CDLCDataInCode.h"
+#import "CDLCSourceVersion.h"
+
 @implementation CDLoadCommand
+{
+    __weak CDMachOFile *_machOFile;
+    NSUInteger _commandOffset;
+}
 
 + (id)loadCommandWithDataCursor:(CDMachOFileDataCursor *)cursor;
 {
@@ -40,7 +48,8 @@
     uint32_t val = [cursor peekInt32];
 
     switch (val) {
-        case LC_SEGMENT:               targetClass = [CDLCSegment32 class]; break;
+        case LC_SEGMENT:               targetClass = [CDLCSegment class]; break;
+        case LC_SEGMENT_64:            targetClass = [CDLCSegment class]; break;
         case LC_SYMTAB:                targetClass = [CDLCSymbolTable class]; break;
             //case LC_SYMSEG: // obsolete
             //case LC_THREAD: // not used?
@@ -64,7 +73,6 @@
         case LC_TWOLEVEL_HINTS:        targetClass = [CDLCTwoLevelHints class]; break;
         case LC_PREBIND_CKSUM:         targetClass = [CDLCPrebindChecksum class]; break;
         case LC_LOAD_WEAK_DYLIB:       targetClass = [CDLCDylib class]; break;
-        case LC_SEGMENT_64:            targetClass = [CDLCSegment64 class]; break;
         case LC_ROUTINES_64:           targetClass = [CDLCRoutines64 class]; break;
         case LC_UUID:                  targetClass = [CDLCUUID class]; break;
         case LC_RPATH:                 targetClass = [CDLCRunPath class]; break;
@@ -72,7 +80,8 @@
         case LC_SEGMENT_SPLIT_INFO:    targetClass = [CDLCLinkeditData class]; break;
         case LC_REEXPORT_DYLIB:        targetClass = [CDLCDylib class]; break;
         case LC_LAZY_LOAD_DYLIB:       targetClass = [CDLCDylib class]; break;
-        case LC_ENCRYPTION_INFO:       targetClass = [CDLCEncryptionInfo class]; break;
+        case LC_ENCRYPTION_INFO:
+        case LC_ENCRYPTION_INFO_64:    targetClass = [CDLCEncryptionInfo class]; break;
         case LC_DYLD_INFO:             targetClass = [CDLCDyldInfo class]; break;
         case LC_DYLD_INFO_ONLY:        targetClass = [CDLCDyldInfo class]; break;
 
@@ -81,21 +90,33 @@
         case LC_VERSION_MIN_IPHONEOS:  targetClass = [CDLCVersionMinimum class]; break;
         case LC_FUNCTION_STARTS:       targetClass = [CDLCFunctionStarts class]; break;
         case LC_DYLD_ENVIRONMENT:      targetClass = [CDLCDylinker class]; break;
-            
+        case LC_MAIN:                  targetClass = [CDLCMain class]; break;
+        case LC_DATA_IN_CODE:          targetClass = [CDLCDataInCode class]; break;
+        case LC_SOURCE_VERSION:        targetClass = [CDLCSourceVersion class]; break;
+        case LC_DYLIB_CODE_SIGN_DRS:   targetClass = [CDLCLinkeditData class]; break; // Designated Requirements
+
+        case LC_BUILD_VERSION:         targetClass = [CDLCBuildVersion class]; break;
+
+        case LC_LINKER_OPTION:
+        case LC_LINKER_OPTIMIZATION_HINT:
+        case LC_VERSION_MIN_TVOS:
+        case LC_VERSION_MIN_WATCHOS:
+        case LC_NOTE:
+
         default:
             NSLog(@"Unknown load command: 0x%08x", val);
     };
 
     //NSLog(@"targetClass: %@", NSStringFromClass(targetClass));
 
-    return [[[targetClass alloc] initWithDataCursor:cursor] autorelease];
+    return [[targetClass alloc] initWithDataCursor:cursor];
 }
 
 - (id)initWithDataCursor:(CDMachOFileDataCursor *)cursor;
 {
     if ((self = [super init])) {
-        nonretained_machOFile = [cursor machOFile];
-        commandOffset = [cursor offset];
+        _machOFile = [cursor machOFile];
+        _commandOffset = [cursor offset];
     }
 
     return self;
@@ -116,9 +137,6 @@
 }
 
 #pragma mark -
-
-@synthesize machOFile = nonretained_machOFile;
-@synthesize commandOffset;
 
 - (uint32_t)cmd;
 {
@@ -183,6 +201,14 @@
         case LC_VERSION_MIN_IPHONEOS:  return @"LC_VERSION_MIN_IPHONEOS";
         case LC_FUNCTION_STARTS:       return @"LC_FUNCTION_STARTS";
         case LC_DYLD_ENVIRONMENT:      return @"LC_DYLD_ENVIRONMENT";
+
+        case LC_LINKER_OPTION:            return @"LC_LINKER_OPTION";
+        case LC_LINKER_OPTIMIZATION_HINT: return @"LC_LINKER_OPTIMIZATION_HINT";
+        case LC_VERSION_MIN_TVOS:         return @"LC_VERSION_MIN_TVOS";
+        case LC_VERSION_MIN_WATCHOS:      return @"LC_VERSION_MIN_WATCHOS";
+        case LC_NOTE:                     return @"LC_NOTE";
+        case LC_BUILD_VERSION:            return @"LC_BUILD_VERSION";
+
         default:
             break;
     }

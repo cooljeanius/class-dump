@@ -1,68 +1,63 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
-#import <Foundation/Foundation.h>
+@protocol CDTypeControllerDelegate;
 
-@class CDClassDump, CDStructureTable, CDSymbolReferences, CDType, CDTypeFormatter;
+@class CDClassDump, CDType, CDTypeFormatter;
 
 @interface CDTypeController : NSObject
-{
-    CDClassDump *nonretained_classDump; // passed during formatting, to get at options.
 
-    CDTypeFormatter *ivarTypeFormatter;
-    CDTypeFormatter *methodTypeFormatter;
-    CDTypeFormatter *propertyTypeFormatter;
-    CDTypeFormatter *structDeclarationTypeFormatter;
+- (id)initWithClassDump:(CDClassDump *)classDump;
 
-    CDStructureTable *structureTable;
-    CDStructureTable *unionTable;
-}
-
-- (id)initWithClassDump:(CDClassDump *)aClassDump;
+@property (weak) id <CDTypeControllerDelegate> delegate;
 
 @property (readonly) CDTypeFormatter *ivarTypeFormatter;
 @property (readonly) CDTypeFormatter *methodTypeFormatter;
 @property (readonly) CDTypeFormatter *propertyTypeFormatter;
 @property (readonly) CDTypeFormatter *structDeclarationTypeFormatter;
 
-- (CDType *)typeFormatter:(CDTypeFormatter *)aFormatter replacementForType:(CDType *)aType;
-- (NSString *)typeFormatter:(CDTypeFormatter *)aFormatter typedefNameForStruct:(CDType *)structType level:(NSUInteger)level;
+@property (nonatomic, readonly) BOOL shouldShowIvarOffsets;
+@property (nonatomic, readonly) BOOL shouldShowMethodAddresses;
+@property (nonatomic, readonly) BOOL targetArchUses64BitABI;
 
-- (void)appendStructuresToString:(NSMutableString *)resultString symbolReferences:(CDSymbolReferences *)symbolReferences;
+@property (nonatomic, assign) BOOL hasUnknownFunctionPointers;
+@property (nonatomic, assign) BOOL hasUnknownBlocks;
 
-- (void)generateTypedefNames;
-- (void)generateMemberNames;
+- (CDType *)typeFormatter:(CDTypeFormatter *)typeFormatter replacementForType:(CDType *)type;
+- (NSString *)typeFormatter:(CDTypeFormatter *)typeFormatter typedefNameForStructure:(CDType *)structureType level:(NSUInteger)level;
+- (void)typeFormatter:(CDTypeFormatter *)typeFormatter didReferenceClassName:(NSString *)name;
+- (void)typeFormatter:(CDTypeFormatter *)typeFormatter didReferenceProtocolNames:(NSArray *)names;
+
+- (void)appendStructuresToString:(NSMutableString *)resultString;
+
+// Phase 0 - initiated from -[CDClassDump registerTypes]
+- (void)phase0RegisterStructure:(CDType *)structure usedInMethod:(BOOL)isUsedInMethod;
 
 // Run phase 1+
 - (void)workSomeMagic;
 
-// Phase 0
-- (void)phase0RegisterStructure:(CDType *)aStructure usedInMethod:(BOOL)isUsedInMethod;
-- (void)endPhase:(NSUInteger)phase;
-
 // Phase 1
-- (void)startPhase1;
-- (void)phase1RegisterStructure:(CDType *)aStructure;
+- (void)phase1RegisterStructure:(CDType *)structure;
 
-// Phase 2
-- (void)startPhase2;
-
-// Phase 3
-- (void)startPhase3;
-
-- (BOOL)shouldShowName:(NSString *)name;
-- (BOOL)shouldShowIvarOffsets;
-- (BOOL)shouldShowMethodAddresses;
-- (BOOL)targetArchUses64BitABI;
+- (void)endPhase:(NSUInteger)phase;
 
 - (CDType *)phase2ReplacementForType:(CDType *)type;
 
-- (void)phase3RegisterStructure:(CDType *)aStructure;
+- (void)phase3RegisterStructure:(CDType *)structure;
 - (CDType *)phase3ReplacementForType:(CDType *)type;
 
+- (BOOL)shouldShowName:(NSString *)name;
 - (BOOL)shouldExpandType:(CDType *)type;
 - (NSString *)typedefNameForType:(CDType *)type;
 
+@end
+
+#pragma mark -
+
+@protocol CDTypeControllerDelegate <NSObject>
+@optional
+- (void)typeController:(CDTypeController *)typeController didReferenceClassName:(NSString *)name;
+- (void)typeController:(CDTypeController *)typeController didReferenceProtocolNames:(NSArray *)names;
 @end

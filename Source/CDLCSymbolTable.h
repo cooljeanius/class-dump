@@ -1,37 +1,25 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDLoadCommand.h"
 
 @class CDSymbol;
 
 @interface CDLCSymbolTable : CDLoadCommand
-{
-    struct symtab_command symtabCommand;
-
-    NSArray *symbols;
-    NSUInteger baseAddress;
-
-    NSDictionary *classSymbols;
-
-    struct {
-        unsigned int didFindBaseAddress:1;
-        unsigned int didWarnAboutUnfoundBaseAddress:1;
-    } flags;
-}
 
 - (void)loadSymbols;
 
-@property (readonly) uint32_t symoff;
-@property (readonly) uint32_t nsyms;
-@property (readonly) uint32_t stroff;
-@property (readonly) uint32_t strsize;
+@property (nonatomic, readonly) uint32_t symoff;
+@property (nonatomic, readonly) uint32_t nsyms;
+@property (nonatomic, readonly) uint32_t stroff;
+@property (nonatomic, readonly) uint32_t strsize;
 
-@property (readonly) NSUInteger baseAddress;
-@property (readonly) NSArray *symbols;
+@property (nonatomic, readonly) NSUInteger baseAddress;
+@property (nonatomic, readonly) NSArray *symbols;
 
-- (CDSymbol *)symbolForClass:(NSString *)className;
+- (CDSymbol *)symbolForClassName:(NSString *)className;
+- (CDSymbol *)symbolForExternalClassName:(NSString *)className;
 
 @end

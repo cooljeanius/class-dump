@@ -1,47 +1,35 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDLCFunctionStarts.h"
 
+#import "ULEB128.h"
+
 @implementation CDLCFunctionStarts
-
-- (id)initWithDataCursor:(CDMachOFileDataCursor *)cursor;
 {
-    if ((self = [super initWithDataCursor:cursor])) {
-        loadCommand.cmd = [cursor readInt32];
-        loadCommand.cmdsize = [cursor readInt32];
-        
-        if (loadCommand.cmdsize > 8) {
-            NSMutableData *_commandData = [[NSMutableData alloc] init];
-            [cursor appendBytesOfLength:loadCommand.cmdsize - 8 intoData:_commandData];
-            commandData = [_commandData copy]; [_commandData release];
-        } else {
-            commandData = nil;
-        }
-    }
-
-    return self;
-}
-
-- (void)dealloc;
-{
-    [commandData release];
-
-    [super dealloc];
+    NSArray *_functionStarts;
 }
 
 #pragma mark -
 
-- (uint32_t)cmd;
+- (NSArray *)functionStarts;
 {
-    return loadCommand.cmd;
-}
-
-- (uint32_t)cmdsize;
-{
-    return loadCommand.cmdsize;
+    if (_functionStarts == nil) {
+        NSData *functionStartsData = [self linkeditData];
+        const uint8_t *start = (uint8_t *)[functionStartsData bytes];
+        const uint8_t *end = start + [functionStartsData length];
+        uint64_t startAddress;
+        uint64_t previousAddress = 0;
+        NSMutableArray *functionStarts = [[NSMutableArray alloc] init];
+        while ((startAddress = read_uleb128(&start, end))) {
+            [functionStarts addObject:@(startAddress + previousAddress)];
+            previousAddress += startAddress;
+        }
+        _functionStarts = [functionStarts copy];
+    }
+    return _functionStarts;
 }
 
 @end

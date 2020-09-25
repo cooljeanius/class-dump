@@ -1,38 +1,30 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
-#import <Foundation/Foundation.h>
-
-#import "CDMachOFileDataCursor.h"
-
+// Importing these here saves us from importing them in the implementation of every load command.
 #include <mach-o/loader.h>
-#include "dyld-info-compat.h"
+#import "CDMachOFileDataCursor.h"
 
 @class CDMachOFile;
 
 @interface CDLoadCommand : NSObject
-{
-    CDMachOFile *nonretained_machOFile;
-    NSUInteger commandOffset;
-}
 
 + (id)loadCommandWithDataCursor:(CDMachOFileDataCursor *)cursor;
 
 - (id)initWithDataCursor:(CDMachOFileDataCursor *)cursor;
 
-- (NSString *)description;
 - (NSString *)extraDescription;
 
-@property (readonly) CDMachOFile *machOFile;
+@property (weak, readonly) CDMachOFile *machOFile;
 @property (readonly) NSUInteger commandOffset;
 
-@property (readonly) uint32_t cmd;
-@property (readonly) uint32_t cmdsize;
-@property (readonly) BOOL mustUnderstandToExecute;
+@property (nonatomic, readonly) uint32_t cmd;
+@property (nonatomic, readonly) uint32_t cmdsize;
+@property (nonatomic, readonly) BOOL mustUnderstandToExecute;
 
-@property (readonly) NSString *commandName;
+@property (nonatomic, readonly) NSString *commandName;
 
 - (void)appendToString:(NSMutableString *)resultString verbose:(BOOL)isVerbose;
 

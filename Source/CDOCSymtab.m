@@ -1,33 +1,27 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDOCSymtab.h"
 
-#import "CDClassDump.h"
 #import "CDOCCategory.h"
 #import "CDOCClass.h"
-#import "CDSymbolReferences.h"
 
 @implementation CDOCSymtab
+{
+    NSMutableArray *_classes;
+    NSMutableArray *_categories;
+}
 
 - (id)init;
 {
     if ((self = [super init])) {
-        classes = [[NSMutableArray alloc] init];
-        categories = [[NSMutableArray alloc] init];
+        _classes = [[NSMutableArray alloc] init];
+        _categories = [[NSMutableArray alloc] init];
     }
 
     return self;
-}
-
-- (void)dealloc;
-{
-    [classes release];
-    [categories release];
-
-    [super dealloc];
 }
 
 #pragma mark - Debugging
@@ -39,18 +33,14 @@
 
 #pragma mark -
 
-@synthesize classes;
-
 - (void)addClass:(CDOCClass *)aClass;
 {
     [self.classes addObject:aClass];
 }
 
-@synthesize categories;
-
-- (void)addCategory:(CDOCCategory *)aCategory;
+- (void)addCategory:(CDOCCategory *)category;
 {
-    [self.categories addObject:aCategory];
+    [self.categories addObject:category];
 }
 
 @end

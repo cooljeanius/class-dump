@@ -1,28 +1,13 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
-
-#import <Foundation/Foundation.h>
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 @interface CDTypeName : NSObject <NSCopying>
-{
-    NSString *name;
-    NSMutableArray *templateTypes;
-    NSString *suffix;
-}
 
-- (id)init;
-- (void)dealloc;
-
-- (id)copyWithZone:(NSZone *)zone;
-- (BOOL)isEqual:(id)otherObject;
-
-- (NSString *)description;
-
-@property (retain) NSString *name;
+@property (strong) NSString *name;
 @property (readonly) NSMutableArray *templateTypes;
-@property (retain) NSString *suffix;
-@property (readonly) BOOL isTemplateType;
+@property (strong) NSString *suffix;
+@property (nonatomic, readonly) BOOL isTemplateType;
 
 @end

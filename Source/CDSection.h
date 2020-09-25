@@ -1,39 +1,24 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
-#import <Foundation/Foundation.h>
-#include <mach-o/loader.h>
-
-@class CDDataCursor, CDMachOFile, CDLCSegment32;
+@class CDMachOFileDataCursor;
+@class CDLCSegment;
 
 @interface CDSection : NSObject
-{
-    NSString *segmentName;
-    NSString *sectionName;
 
-    NSData *data;
-    struct {
-        unsigned int hasLoadedData:1;
-    } _flags;
-}
+- (id)initWithDataCursor:(CDMachOFileDataCursor *)cursor segment:(CDLCSegment *)segment;
 
-- (id)init;
+@property (weak, readonly) CDLCSegment *segment;
 
-- (NSString *)description;
+@property (nonatomic, readonly) NSData *data;
 
-@property (retain) NSString *segmentName;
-@property (retain) NSString *sectionName;
+@property (nonatomic, readonly) NSString *segmentName;
+@property (nonatomic, readonly) NSString *sectionName;
 
-- (NSData *)data;
-- (void)loadData;
-- (void)unloadData;
-
-@property (readonly) NSUInteger addr;
-@property (readonly) NSUInteger size;
-
-- (CDMachOFile *)machOFile;
+@property (nonatomic, readonly) NSUInteger addr;
+@property (nonatomic, readonly) NSUInteger size;
 
 - (BOOL)containsAddress:(NSUInteger)address;
 - (NSUInteger)fileOffsetForAddress:(NSUInteger)address;

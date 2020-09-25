@@ -1,115 +1,21 @@
 // -*- mode: ObjC -*-
 
 //  This file is part of class-dump, a utility for examining the Objective-C segment of Mach-O files.
-//  Copyright (C) 1997-1998, 2000-2001, 2004-2011 Steve Nygard.
+//  Copyright (C) 1997-2019 Steve Nygard.
 
 #import "CDLCDyldInfo.h"
 
 #import "CDMachOFile.h"
 
 #import "CDLCSegment.h"
+#import "ULEB128.h"
 
 static BOOL debugBindOps = NO;
 static BOOL debugExportedSymbols = NO;
 
 // Can use dyldinfo(1) to view info.
 
-// http://www.redhat.com/docs/manuals/enterprise/RHEL-4-Manual/gnu-assembler/uleb128.html
-// uleb128 stands for "unsigned little endian base 128."
-// This is a compact, variable length representation of numbers used by the DWARF symbolic debugging format.
-
-// Top bit of byte is set until last byte.
-// Other 7 bits are the "slice".
-// Basically, it represents the low order bits 7 at a time, and can stop when the rest of the bits would be zero.
-// This needs to modify ptr.
-
-// For example, uleb with these bytes: e8 d7 15
-// 0xe8 = 1110 1000
-// 0xd7 = 1101 0111
-// 0x15 = 0001 0101
-
-//                 .... .... .... .... .... .... .... .... .... .... .... .... .... .... .... ....
-// 0xe8 1 1101000  .... .... .... .... .... .... .... .... .... .... .... .... .... .... .110 1000
-// 0xd7 1 1010111  .... .... .... .... .... .... .... .... .... .... .... .... ..10 1011 1110 1000
-// 0x15 0 0010101  .... .... .... .... .... .... .... .... .... .... .... .... ..10 1011 1110 1000
-// 0x15 0 0010101  .... .... .... .... .... .... .... .... .... .... ...0 0101 0110 1011 1110 1000
-// Result is: 0x056be8
-// So... 24 bits to encode 64 bits
-
-static uint64_t read_uleb128(const uint8_t **ptrptr, const uint8_t *end)
-{
-    const uint8_t *ptr = *ptrptr;
-    uint64_t result = 0;
-    int bit = 0;
-
-    //NSLog(@"read_uleb128()");
-    do {
-        NSCAssert(ptr != end, @"Malformed uleb128");
-
-        //NSLog(@"byte: %02x", *ptr);
-        uint64_t slice = *ptr & 0x7f;
-
-        if (bit >= 64 || slice << bit >> bit != slice) {
-            NSLog(@"uleb128 too big");
-            exit(88);
-        } else {
-            result |= (slice << bit);
-            bit += 7;
-        }
-    }
-    while ((*ptr++ & 0x80) != 0);
-
-#if 0
-    static NSUInteger maxlen = 0;
-    if (maxlen < ptr - *ptrptr) {
-        const uint8_t *ptr2 = *ptrptr;
-
-        NSMutableArray *byteStrs = [NSMutableArray array];
-        do {
-            [byteStrs addObject:[NSString stringWithFormat:@"%02x", *ptr2]];
-        } while (++ptr2 < ptr);
-        //NSLog(@"max uleb length now: %u (%@)", ptr - *ptrptr, [byteStrs componentsJoinedByString:@" "]);
-        //NSLog(@"sizeof(uint64_t): %u, sizeof(uintptr_t): %u", sizeof(uint64_t), sizeof(uintptr_t));
-        maxlen = ptr - *ptrptr;
-    }
-#endif
-
-    *ptrptr = ptr;
-    return result;
-}
-
-static int64_t read_sleb128(const uint8_t **ptrptr, const uint8_t *end)
-{
-    const uint8_t *ptr = *ptrptr;
-
-    int64_t result = 0;
-    int bit = 0;
-    uint8_t byte;
-
-    //NSLog(@"read_sleb128()");
-    do {
-        NSCAssert(ptr != end, @"Malformed sleb128");
-
-        byte = *ptr++;
-        //NSLog(@"%02x", byte);
-        result |= ((byte & 0x7f) << bit);
-        bit += 7;
-    } while ((byte & 0x80) != 0);
-
-    //NSLog(@"result before sign extend: %ld", result);
-    // sign extend negative numbers
-    // This essentially clears out from -1 the low order bits we've already set, and combines that with our bits.
-    if ( (byte & 0x40) != 0 )
-        result |= (-1LL) << bit;
-
-    //NSLog(@"result after sign extend: %ld", result);
-
-    //NSLog(@"ptr before: %p, after: %p", *ptrptr, ptr);
-    *ptrptr = ptr;
-    return result;
-}
-
-static NSString *CDRebaseTypeString(uint8_t type)
+static NSString *CDRebaseTypeDescription(uint8_t type)
 {
     switch (type) {
         case REBASE_TYPE_POINTER:         return @"Pointer";
@@ -120,7 +26,7 @@ static NSString *CDRebaseTypeString(uint8_t type)
     return @"Unknown";
 }
 
-static NSString *CDBindTypeString(uint8_t type)
+static NSString *CDBindTypeDescription(uint8_t type)
 {
     switch (type) {
         case REBASE_TYPE_POINTER:         return @"Pointer";
@@ -130,55 +36,59 @@ static NSString *CDBindTypeString(uint8_t type)
 
     return @"Unknown";
 }
+
+@interface CDLCDyldInfo ()
+@end
+
+#pragma mark -
 
 // Needs access to: list of segments
 
 @implementation CDLCDyldInfo
+{
+    struct dyld_info_command _dyldInfoCommand;
+    
+    NSUInteger _ptrSize;
+    NSMutableDictionary *_symbolNamesByAddress;
+}
 
 - (id)initWithDataCursor:(CDMachOFileDataCursor *)cursor;
 {
     if ((self = [super initWithDataCursor:cursor])) {
-        dyldInfoCommand.cmd = [cursor readInt32];
-        dyldInfoCommand.cmdsize = [cursor readInt32];
+        _dyldInfoCommand.cmd     = [cursor readInt32];
+        _dyldInfoCommand.cmdsize = [cursor readInt32];
         
-        dyldInfoCommand.rebase_off = [cursor readInt32];
-        dyldInfoCommand.rebase_size = [cursor readInt32];
-        dyldInfoCommand.bind_off = [cursor readInt32];
-        dyldInfoCommand.bind_size = [cursor readInt32];
-        dyldInfoCommand.weak_bind_off = [cursor readInt32];
-        dyldInfoCommand.weak_bind_size = [cursor readInt32];
-        dyldInfoCommand.lazy_bind_off = [cursor readInt32];
-        dyldInfoCommand.lazy_bind_size = [cursor readInt32];
-        dyldInfoCommand.export_off = [cursor readInt32];
-        dyldInfoCommand.export_size = [cursor readInt32];
+        _dyldInfoCommand.rebase_off     = [cursor readInt32];
+        _dyldInfoCommand.rebase_size    = [cursor readInt32];
+        _dyldInfoCommand.bind_off       = [cursor readInt32];
+        _dyldInfoCommand.bind_size      = [cursor readInt32];
+        _dyldInfoCommand.weak_bind_off  = [cursor readInt32];
+        _dyldInfoCommand.weak_bind_size = [cursor readInt32];
+        _dyldInfoCommand.lazy_bind_off  = [cursor readInt32];
+        _dyldInfoCommand.lazy_bind_size = [cursor readInt32];
+        _dyldInfoCommand.export_off     = [cursor readInt32];
+        _dyldInfoCommand.export_size    = [cursor readInt32];
         
 #if 0
-        NSLog(@"       cmdsize: %08x", dyldInfoCommand.cmdsize);
-        NSLog(@"    rebase_off: %08x", dyldInfoCommand.rebase_off);
-        NSLog(@"   rebase_size: %08x", dyldInfoCommand.rebase_size);
-        NSLog(@"      bind_off: %08x", dyldInfoCommand.bind_off);
-        NSLog(@"     bind_size: %08x", dyldInfoCommand.bind_size);
-        NSLog(@" weak_bind_off: %08x", dyldInfoCommand.weak_bind_off);
-        NSLog(@"weak_bind_size: %08x", dyldInfoCommand.weak_bind_size);
-        NSLog(@" lazy_bind_off: %08x", dyldInfoCommand.lazy_bind_off);
-        NSLog(@"lazy_bind_size: %08x", dyldInfoCommand.lazy_bind_size);
-        NSLog(@"    export_off: %08x", dyldInfoCommand.export_off);
-        NSLog(@"   export_size: %08x", dyldInfoCommand.export_size);
+        NSLog(@"       cmdsize: %08x", _dyldInfoCommand.cmdsize);
+        NSLog(@"    rebase_off: %08x", _dyldInfoCommand.rebase_off);
+        NSLog(@"   rebase_size: %08x", _dyldInfoCommand.rebase_size);
+        NSLog(@"      bind_off: %08x", _dyldInfoCommand.bind_off);
+        NSLog(@"     bind_size: %08x", _dyldInfoCommand.bind_size);
+        NSLog(@" weak_bind_off: %08x", _dyldInfoCommand.weak_bind_off);
+        NSLog(@"weak_bind_size: %08x", _dyldInfoCommand.weak_bind_size);
+        NSLog(@" lazy_bind_off: %08x", _dyldInfoCommand.lazy_bind_off);
+        NSLog(@"lazy_bind_size: %08x", _dyldInfoCommand.lazy_bind_size);
+        NSLog(@"    export_off: %08x", _dyldInfoCommand.export_off);
+        NSLog(@"   export_size: %08x", _dyldInfoCommand.export_size);
 #endif
         
-        ptrSize = [[cursor machOFile] ptrSize];
+        _ptrSize = [[cursor machOFile] ptrSize];
         
-        symbolNamesByAddress = [[NSMutableDictionary alloc] init];
+        _symbolNamesByAddress = [[NSMutableDictionary alloc] init];
     }
 
     return self;
-}
-
-- (void)dealloc;
-{
-    [symbolNamesByAddress release];
-
-    [super dealloc];
 }
 
 #pragma mark -
@@ -198,17 +108,17 @@ static NSString *CDBindTypeString(uint8_t type)
 
 - (uint32_t)cmd;
 {
-    return dyldInfoCommand.cmd;
+    return _dyldInfoCommand.cmd;
 }
 
 - (uint32_t)cmdsize;
 {
-    return dyldInfoCommand.cmdsize;
+    return _dyldInfoCommand.cmdsize;
 }
 
 - (NSString *)symbolNameForAddress:(NSUInteger)address;
 {
-    return [symbolNamesByAddress objectForKey:[NSNumber numberWithUnsignedInteger:address]];
+    return [_symbolNamesByAddress objectForKey:[NSNumber numberWithUnsignedInteger:address]];
 }
 
 #pragma mark - Rebasing
@@ -220,16 +130,16 @@ static NSString *CDBindTypeString(uint8_t type)
     BOOL isDone = NO;
     NSUInteger rebaseCount = 0;
 
-    NSArray *segments = [nonretained_machOFile segments];
+    NSArray *segments = self.machOFile.segments;
     NSParameterAssert([segments count] > 0);
 
-    uint64_t address = [[segments objectAtIndex:0] vmaddr];
+    uint64_t address = [segments[0] vmaddr];
     uint8_t type = 0;
 
     NSLog(@"----------------------------------------------------------------------");
-    NSLog(@"rebase_off: %u, rebase_size: %u", dyldInfoCommand.rebase_off, dyldInfoCommand.rebase_size);
-    const uint8_t *start = [[nonretained_machOFile machOData] bytes] + dyldInfoCommand.rebase_off;
-    const uint8_t *end = start + dyldInfoCommand.rebase_size;
+    NSLog(@"rebase_off: %u, rebase_size: %u", _dyldInfoCommand.rebase_off, _dyldInfoCommand.rebase_size);
+    const uint8_t *start = (uint8_t *)[self.machOFile.data bytes] + _dyldInfoCommand.rebase_off;
+    const uint8_t *end = start + _dyldInfoCommand.rebase_size;
 
     NSLog(@"address: %016llx", address);
     const uint8_t *ptr = start;
@@ -254,7 +164,7 @@ static NSString *CDBindTypeString(uint8_t type)
                 
                 //NSLog(@"REBASE_OPCODE: SET_SEGMENT_AND_OFFSET_ULEB,        segment index: %u, offset: %016lx", immediate, val);
                 NSParameterAssert(immediate < [segments count]);
-                address = [[segments objectAtIndex:immediate] vmaddr] + val;
+                address = [segments[immediate] vmaddr] + val;
                 //NSLog(@"    address: %016lx", address);
                 break;
             }
@@ -271,7 +181,7 @@ static NSString *CDBindTypeString(uint8_t type)
             case REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
                 // I expect sizeof(uintptr_t) == sizeof(uint64_t)
                 //NSLog(@"REBASE_OPCODE: ADD_ADDR_IMM_SCALED,                addr += %u * %u", immediate, sizeof(uint64_t));
-                address += immediate * ptrSize;
+                address += immediate * _ptrSize;
                 //NSLog(@"    address: %016lx", address);
                 break;
                 
@@ -279,7 +189,7 @@ static NSString *CDBindTypeString(uint8_t type)
                 //NSLog(@"REBASE_OPCODE: DO_REBASE_IMM_TIMES,                count: %u", immediate);
                 for (uint32_t index = 0; index < immediate; index++) {
                     [self rebaseAddress:address type:type];
-                    address += ptrSize;
+                    address += _ptrSize;
                 }
                 rebaseCount += immediate;
                 break;
@@ -291,7 +201,7 @@ static NSString *CDBindTypeString(uint8_t type)
                 //NSLog(@"REBASE_OPCODE: DO_REBASE_ULEB_TIMES,               count: 0x%016lx", count);
                 for (uint64_t index = 0; index < count; index++) {
                     [self rebaseAddress:address type:type];
-                    address += ptrSize;
+                    address += _ptrSize;
                 }
                 rebaseCount += count;
                 break;
@@ -302,7 +212,7 @@ static NSString *CDBindTypeString(uint8_t type)
                 // --------------------------------------------------------:
                 //NSLog(@"REBASE_OPCODE: DO_REBASE_ADD_ADDR_ULEB,            addr += 0x%016lx", val);
                 [self rebaseAddress:address type:type];
-                address += ptrSize + val;
+                address += _ptrSize + val;
                 rebaseCount++;
                 break;
             }
@@ -313,7 +223,7 @@ static NSString *CDBindTypeString(uint8_t type)
                 //NSLog(@"REBASE_OPCODE: DO_REBASE_ULEB_TIMES_SKIPPING_ULEB, count: %016lx, skip: %016lx", count, skip);
                 for (uint64_t index = 0; index < count; index++) {
                     [self rebaseAddress:address type:type];
-                    address += ptrSize + skip;
+                    address += _ptrSize + skip;
                 }
                 rebaseCount += count;
                 break;
@@ -346,10 +256,10 @@ static NSString *CDBindTypeString(uint8_t type)
 {
     if (debugBindOps) {
         NSLog(@"----------------------------------------------------------------------");
-        NSLog(@"bind_off: %u, bind_size: %u", dyldInfoCommand.bind_off, dyldInfoCommand.bind_size);
+        NSLog(@"bind_off: %u, bind_size: %u", _dyldInfoCommand.bind_off, _dyldInfoCommand.bind_size);
     }
-    const uint8_t *start = [[nonretained_machOFile machOData] bytes] + dyldInfoCommand.bind_off;
-    const uint8_t *end = start + dyldInfoCommand.bind_size;
+    const uint8_t *start = (uint8_t *)[self.machOFile.data bytes] + _dyldInfoCommand.bind_off;
+    const uint8_t *end = start + _dyldInfoCommand.bind_size;
 
     [self logBindOps:start end:end isLazy:NO];
 }
@@ -358,10 +268,10 @@ static NSString *CDBindTypeString(uint8_t type)
 {
     if (debugBindOps) {
         NSLog(@"----------------------------------------------------------------------");
-        NSLog(@"weak_bind_off: %u, weak_bind_size: %u", dyldInfoCommand.weak_bind_off, dyldInfoCommand.weak_bind_size);
+        NSLog(@"weak_bind_off: %u, weak_bind_size: %u", _dyldInfoCommand.weak_bind_off, _dyldInfoCommand.weak_bind_size);
     }
-    const uint8_t *start = [[nonretained_machOFile machOData] bytes] + dyldInfoCommand.weak_bind_off;
-    const uint8_t *end = start + dyldInfoCommand.weak_bind_size;
+    const uint8_t *start = (uint8_t *)[self.machOFile.data bytes] + _dyldInfoCommand.weak_bind_off;
+    const uint8_t *end = start + _dyldInfoCommand.weak_bind_size;
 
     [self logBindOps:start end:end isLazy:NO];
 }
@@ -370,10 +280,10 @@ static NSString *CDBindTypeString(uint8_t type)
 {
     if (debugBindOps) {
         NSLog(@"----------------------------------------------------------------------");
-        NSLog(@"lazy_bind_off: %u, lazy_bind_size: %u", dyldInfoCommand.lazy_bind_off, dyldInfoCommand.lazy_bind_size);
+        NSLog(@"lazy_bind_off: %u, lazy_bind_size: %u", _dyldInfoCommand.lazy_bind_off, _dyldInfoCommand.lazy_bind_size);
     }
-    const uint8_t *start = [[nonretained_machOFile machOData] bytes] + dyldInfoCommand.lazy_bind_off;
-    const uint8_t *end = start + dyldInfoCommand.lazy_bind_size;
+    const uint8_t *start = (uint8_t *)[self.machOFile.data bytes] + _dyldInfoCommand.lazy_bind_off;
+    const uint8_t *end = start + _dyldInfoCommand.lazy_bind_size;
 
     [self logBindOps:start end:end isLazy:YES];
 }
@@ -389,10 +299,10 @@ static NSString *CDBindTypeString(uint8_t type)
     const char *symbolName = NULL;
     uint8_t symbolFlags = 0;
 
-    NSArray *segments = [nonretained_machOFile segments];
+    NSArray *segments = [self.machOFile segments];
     NSParameterAssert([segments count] > 0);
 
-    uint64_t address = [[segments objectAtIndex:0] vmaddr];
+    uint64_t address = [segments[0] vmaddr];
 
     const uint8_t *ptr = start;
     while ((ptr < end) && isDone == NO) {
@@ -444,7 +354,7 @@ static NSString *CDBindTypeString(uint8_t type)
                 break;
                 
             case BIND_OPCODE_SET_TYPE_IMM:
-                if (debugBindOps) NSLog(@"BIND_OPCODE: SET_TYPE_IMM,                   type = %u (%@)", immediate, CDBindTypeString(immediate));
+                if (debugBindOps) NSLog(@"BIND_OPCODE: SET_TYPE_IMM,                   type = %u (%@)", immediate, CDBindTypeDescription(immediate));
                 type = immediate;
                 break;
                 
@@ -457,7 +367,7 @@ static NSString *CDBindTypeString(uint8_t type)
                 segmentIndex = immediate;
                 uint64_t val = read_uleb128(&ptr, end);
                 if (debugBindOps) NSLog(@"BIND_OPCODE: SET_SEGMENT_AND_OFFSET_ULEB,    segmentIndex: %u, offset: 0x%016llx", segmentIndex, val);
-                address = [[segments objectAtIndex:segmentIndex] vmaddr] + val;
+                address = [segments[segmentIndex] vmaddr] + val;
                 if (debugBindOps) NSLog(@"    address = 0x%016llx", address);
                 break;
             }
@@ -472,7 +382,7 @@ static NSString *CDBindTypeString(uint8_t type)
             case BIND_OPCODE_DO_BIND:
                 if (debugBindOps) NSLog(@"BIND_OPCODE: DO_BIND");
                 [self bindAddress:address type:type symbolName:symbolName flags:symbolFlags addend:addend libraryOrdinal:libraryOrdinal];
-                address += ptrSize;
+                address += _ptrSize;
                 bindCount++;
                 break;
                 
@@ -480,15 +390,15 @@ static NSString *CDBindTypeString(uint8_t type)
                 uint64_t val = read_uleb128(&ptr, end);
                 if (debugBindOps) NSLog(@"BIND_OPCODE: DO_BIND_ADD_ADDR_ULEB,          address += %016llx", val);
                 [self bindAddress:address type:type symbolName:symbolName flags:symbolFlags addend:addend libraryOrdinal:libraryOrdinal];
-                address += ptrSize + val;
+                address += _ptrSize + val;
                 bindCount++;
                 break;
             }
                 
             case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-                if (debugBindOps) NSLog(@"BIND_OPCODE: DO_BIND_ADD_ADDR_IMM_SCALED,    address += %u * %lu", immediate, ptrSize);
+                if (debugBindOps) NSLog(@"BIND_OPCODE: DO_BIND_ADD_ADDR_IMM_SCALED,    address += %u * %lu", immediate, _ptrSize);
                 [self bindAddress:address type:type symbolName:symbolName flags:symbolFlags addend:addend libraryOrdinal:libraryOrdinal];
-                address += ptrSize + immediate * ptrSize;
+                address += _ptrSize + immediate * _ptrSize;
                 bindCount++;
                 break;
                 
@@ -498,7 +408,7 @@ static NSString *CDBindTypeString(uint8_t type)
                 if (debugBindOps) NSLog(@"BIND_OPCODE: DO_BIND_ULEB_TIMES_SKIPPING_ULEB, count: %016llx, skip: %016llx", count, skip);
                 for (uint64_t index = 0; index < count; index++) {
                     [self bindAddress:address type:type symbolName:symbolName flags:symbolFlags addend:addend libraryOrdinal:libraryOrdinal];
-                    address += ptrSize + skip;
+                    address += _ptrSize + skip;
                 }
                 bindCount += count;
                 break;
@@ -527,8 +437,7 @@ static NSString *CDBindTypeString(uint8_t type)
 
     NSNumber *key = [NSNumber numberWithUnsignedInteger:address]; // I don't think 32-bit will dump 64-bit stuff.
     NSString *str = [[NSString alloc] initWithUTF8String:symbolName];
-    [symbolNamesByAddress setObject:str forKey:key];
-    [str release];
+    _symbolNamesByAddress[key] = str;
 }
 
 #pragma mark - Exported symbols
@@ -537,12 +446,12 @@ static NSString *CDBindTypeString(uint8_t type)
 {
     if (debugExportedSymbols) {
         NSLog(@"----------------------------------------------------------------------");
-        NSLog(@"export_off: %u, export_size: %u", dyldInfoCommand.export_off, dyldInfoCommand.export_size);
-        NSLog(@"hexdump -Cv -s %u -n %u", dyldInfoCommand.export_off, dyldInfoCommand.export_size);
+        NSLog(@"export_off: %u, export_size: %u", _dyldInfoCommand.export_off, _dyldInfoCommand.export_size);
+        NSLog(@"hexdump -Cv -s %u -n %u", _dyldInfoCommand.export_off, _dyldInfoCommand.export_size);
     }
 
-    const uint8_t *start = [[nonretained_machOFile machOData] bytes] + dyldInfoCommand.export_off;
-    const uint8_t *end = start + dyldInfoCommand.export_size;
+    const uint8_t *start = (uint8_t *)[self.machOFile.data bytes] + _dyldInfoCommand.export_off;
+    const uint8_t *end = start + _dyldInfoCommand.export_size;
 
     NSLog(@"         Type Flags Offset           Name");
     NSLog(@"------------- ----- ---------------- ----");
